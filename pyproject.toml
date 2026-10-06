@@ -1,0 +1,10 @@
+[project]
+name = "agent-study"
+version = "0.1.0"
+description = "Senior Java Developer → AI Agent Engineer"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[dependency-groups]
+dev = []

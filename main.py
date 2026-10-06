@@ -18,7 +18,6 @@ user["preferences"]["model"] = "copilot"
 
 
 def get_pending_tasks(user):
-    print("Tasks not done:")
     s = []
     for t in user["tasks"]:
         if not t["done"]:
@@ -34,18 +33,17 @@ add_task(user, "learn Agent")
 add_task(user, "learn Java", True)
 
 def print_user_summary(user, **keywords):
-    print(user["id"], ":", user["name"])
+    s = json.dumps(user, indent=2)
+    print(s)
     for kw in keywords:
         print(kw, ":", keywords[kw])
 
 print_user_summary(user, last_login="10/6", modified=True)
-
-s = json.dumps(user, indent=2)
-print(s)
-print(json.dumps(get_pending_tasks(user)))
+print("Tasks not done:", json.dumps(get_pending_tasks(user)))
 
 
-data = json.loads(s)
-print(data["name"])
+def load(s):
+    data = json.loads(s)
+    print(data["name"])
 
     
