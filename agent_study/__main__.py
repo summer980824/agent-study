@@ -15,14 +15,37 @@ def main():
         ]
     }
 
+
     user.update_user_name(user_1, "Summer")
     user.update_user_model(user_1, "Kimi")
 
-    task.add_task(user_1, "learn Agent")
-    task.add_task(user_1, "learn Java", True)
+    try:
+        task.add_task(user_1, "learn Agent")
+        task.add_task(user_1, "learn Java", True)
+        task.add_task(user_1, "")
+    except ValueError as e:
+        print(f"Error: {e}")
 
     user.print_user_summary(user_1, last_login="10/6", modified=True)
     user.print_tasks_not_done(user_1)
+
+    
+    user_2 = {
+        "id": 1002,
+        "name": "Tom",
+        "preferences": {
+            "language": "zh",
+            "model": "gpt"
+        },
+        "tasks": [
+        ]
+    }
+
+    try:
+        task.add_task(user_2, "learn sth")
+    except ValueError as e:
+        print(f"Error: {e}")
+
 
 
 if __name__ == "__main__":
