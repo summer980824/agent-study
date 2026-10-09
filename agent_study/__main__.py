@@ -25,6 +25,8 @@ def main():
         task.add_task(user_1, "")
     except ValueError as e:
         print(f"Error: {e}")
+    finally:
+        print("Add tasks complete")
 
     user.print_user_summary(user_1, last_login="10/6", modified=True)
     user.print_tasks_not_done(user_1)
@@ -46,6 +48,11 @@ def main():
     except ValueError as e:
         print(f"Error: {e}")
 
+    file_path = "agent_study/task.txt"
+    task.save_tasks(user.get_pending_tasks(user_1), file_path)
+    print(task.load_tasks(file_path))
+    task.append_task("adhoc task", file_path)
+    print(task.load_tasks(file_path))
 
 
 if __name__ == "__main__":
