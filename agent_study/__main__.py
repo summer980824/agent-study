@@ -1,8 +1,9 @@
-from agent_study import user, task
+from agent_study.user import User
+from agent_study import task
 
 
 def main():
-    user_1 = {
+    user_1 = User({
         "id": 1001,
         "name": "Alice",
         "preferences": {
@@ -13,26 +14,24 @@ def main():
             {"id": 1, "title": "learn Python", "done": True},
             {"id": 2, "title": "learn RAG", "done": False}
         ]
-    }
+    })
 
-
-    user.update_user_name(user_1, "Summer")
-    user.update_user_model(user_1, "Kimi")
+    user_1.update_user_name("Summer")
+    user_1.update_user_model("Kimi")
 
     try:
-        task.add_task(user_1, "learn Agent")
-        task.add_task(user_1, "learn Java", True)
-        task.add_task(user_1, "")
+        task.add_task(user_1.user, "learn Agent")
+        task.add_task(user_1.user, "learn Java", True)
+        task.add_task(user_1.user, "")
     except ValueError as e:
         print(f"Error: {e}")
     finally:
         print("Add tasks complete")
 
-    user.print_user_summary(user_1, last_login="10/6", modified=True)
-    user.print_tasks_not_done(user_1)
+    user_1.print_user_summary(last_login="10/6", modified=True)
+    user_1.print_tasks_not_done()
 
-    
-    user_2 = {
+    user_2 = User({
         "id": 1002,
         "name": "Tom",
         "preferences": {
@@ -41,15 +40,18 @@ def main():
         },
         "tasks": [
         ]
-    }
+    })
+
+    print(user_2)
 
     try:
-        task.add_task(user_2, "learn sth")
+        task.add_task(user_2.user, "learn sth")
     except ValueError as e:
         print(f"Error: {e}")
 
+
     file_path = "agent_study/task.txt"
-    task.save_tasks(user.get_pending_tasks(user_1), file_path)
+    task.save_tasks(task.get_pending_tasks(user_1.user['tasks']), file_path)
     print(task.load_tasks(file_path))
     task.append_task("adhoc task", file_path)
     print(task.load_tasks(file_path))

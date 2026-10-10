@@ -1,13 +1,9 @@
 from agent_study import util
 
 
-def get_pending_tasks(user) -> list[str]:
-    s = []
-    for t in user["tasks"]:
-        if not t["done"]:
-            s.append(t)
+def get_pending_tasks(tasks: list[dict]) -> list[dict]:
+    return [task for task in tasks if not task["done"]]
 
-    return s
 
 def add_task(user, title, done=False):
     if not isinstance(title, str):
@@ -36,7 +32,7 @@ def load_tasks(file_path_str: str) -> list[str]:
         #split each line, drop empty lines
         return [line for line in txt.splitlines() if line.strip()]
     else:
-        return "NAN"
+        return []
 
 
 def append_task(task: str, file_path_str: str) -> None:
