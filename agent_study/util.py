@@ -7,7 +7,7 @@ def write_file(file_path_str, str_txt):
         file.write(str_txt)
 
 
-def read_file(file_path_str):
+def read_file(file_path_str) -> str | None:
     file_path = Path(file_path_str)
     with file_path.open("r", encoding="utf-8") as file:
         return file.read()

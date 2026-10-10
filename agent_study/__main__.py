@@ -3,7 +3,7 @@ from agent_study import task
 
 
 def main():
-    user_1 = User({
+    user_1 = User.from_dict({
         "id": 1001,
         "name": "Alice",
         "preferences": {
@@ -16,13 +16,13 @@ def main():
         ]
     })
 
-    user_1.update_user_name("Summer")
-    user_1.update_user_model("Kimi")
+    user_1.name = "Summer"
+    user_1.preferences.model = "Kimi"
 
     try:
-        task.add_task(user_1.user, "learn Agent")
-        task.add_task(user_1.user, "learn Java", True)
-        task.add_task(user_1.user, "")
+        user_1.add_task("learn Agent")
+        user_1.add_task("learn Java", True)
+        user_1.add_task("")
     except ValueError as e:
         print(f"Error: {e}")
     finally:
@@ -31,30 +31,17 @@ def main():
     user_1.print_user_summary(last_login="10/6", modified=True)
     user_1.print_tasks_not_done()
 
-    user_2 = User({
-        "id": 1002,
-        "name": "Tom",
-        "preferences": {
-            "language": "zh",
-            "model": "gpt"
-        },
-        "tasks": [
-        ]
-    })
-
-    print(user_2)
-
-    try:
-        task.add_task(user_2.user, "learn sth")
-    except ValueError as e:
-        print(f"Error: {e}")
-
+    user_2 = User(id=1002, name="Tom")
+    user_2.add_task("learn sth")
 
     file_path = "agent_study/task.txt"
-    task.save_tasks(task.get_pending_tasks(user_1.user['tasks']), file_path)
+    task.save_tasks(user_1.pending_tasks(), file_path)
     print(task.load_tasks(file_path))
     task.append_task("adhoc task", file_path)
     print(task.load_tasks(file_path))
+
+    user_3 = User.load('{"id": 1003, "name": "Jack"}')
+    print(user_3)
 
 
 if __name__ == "__main__":
