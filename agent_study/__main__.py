@@ -1,5 +1,7 @@
 from pydantic import ValidationError
 
+from pathlib import Path
+
 from agent_study.user import User
 from agent_study import task
 
@@ -13,8 +15,8 @@ def main():
             "model": "gpt"
         },
         "tasks": [
-            {"id": 1, "title": "learn Python", "done": True},
-            {"id": 2, "title": "learn RAG", "done": False}
+            {"id": 1, "title": "learn Python", "status": "done"},
+            {"id": 2, "title": "learn RAG"}
         ]
     })
 
@@ -23,7 +25,7 @@ def main():
 
     try:
         user_1.add_task("learn Agent")
-        user_1.add_task("learn Java", True)
+        user_1.add_task("learn Java", status="done")
         user_1.add_task("")
     except ValueError as e:
         print(f"Error: {e}")
@@ -36,7 +38,7 @@ def main():
     user_2 = User(id=1002, name="Tom")
     user_2.add_task("learn sth")
 
-    file_path = "agent_study/task.txt"
+    file_path = Path("agent_study") / "task.txt"
     task.save_tasks(user_1.pending_tasks(), file_path)
     print(task.load_tasks(file_path))
     task.append_task("adhoc task", file_path)
@@ -44,7 +46,12 @@ def main():
 
     user_3 = User.load('{"id": 1003, "name": "Jack"}')
     try:
-        user_3.add_task("", False)
+        user_3.add_task(" ")
+    except ValidationError as ve:
+        print(f"Error: {ve}")
+
+    try:
+        user_3.add_task("1", "not sure")
     except ValidationError as ve:
         print(f"Error: {ve}")
 
