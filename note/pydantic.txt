@@ -1,0 +1,6 @@
+pydantic中的model生成instance只接受关键字参数，不能用位置参数
+model可以直接接受dict类型自动解析：user_1 = User(**data)
+pydantic 对class中可变默认值是安全的——每个实例会拿到独立的副本，不会像 dataclass 那样共享同一个列表（这正是 dataclass 需要 field(default_factory=list) 的原因，pydantic 帮你处理了
+model_dump方法class->dict
+model_dump_json方法class->json
+@classmethod相当于类的构造器

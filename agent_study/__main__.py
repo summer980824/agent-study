@@ -1,3 +1,5 @@
+from pydantic import ValidationError
+
 from agent_study.user import User
 from agent_study import task
 
@@ -41,7 +43,10 @@ def main():
     print(task.load_tasks(file_path))
 
     user_3 = User.load('{"id": 1003, "name": "Jack"}')
-    print(user_3)
+    try:
+        user_3.add_task("", False)
+    except ValidationError as ve:
+        print(f"Error: {ve}")
 
 
 if __name__ == "__main__":
