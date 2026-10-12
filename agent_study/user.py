@@ -17,8 +17,6 @@ class TaskItem(BaseModel):
     @field_validator("title")
     @classmethod
     def title_not_blank(cls, v: str) -> str:
-        if not isinstance(v, str):
-            raise TypeError("title must be a string")
         if not v.strip():
             raise ValueError("title cannot be blank")
         return v.strip()

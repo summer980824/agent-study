@@ -4,3 +4,9 @@ pydantic 对class中可变默认值是安全的——每个实例会拿到独立
 model_dump方法class->dict
 model_dump_json方法class->json
 @classmethod相当于类的构造器
+
+settings加赞不同env方式：
+```bash
+APP_ENV=prod uv run python -m agent_study   # Linux/Git Bash
+set APP_ENV=prod && uv run python -m agent_study  # Windows cmd
+$env:APP_ENV="prod"; uv run python -m agent_study # PowerShell

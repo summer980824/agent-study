@@ -4,6 +4,7 @@ from pathlib import Path
 
 from agent_study.user import User
 from agent_study import task
+from agent_study.config import settings
 
 
 def main():
@@ -54,6 +55,8 @@ def main():
         user_3.add_task("1", "not sure")
     except ValidationError as ve:
         print(f"Error: {ve}")
+
+    print(settings.MODEL_NAME)
 
 
 if __name__ == "__main__":
