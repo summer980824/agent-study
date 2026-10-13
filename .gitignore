@@ -5,8 +5,9 @@ __pycache__/
 dist/
 build/
 *.egg
-.env.dev
-.env.prod
+.env
+.env.*
+!.env.example
 
 # Jupyter
 .ipynb_checkpoints/
