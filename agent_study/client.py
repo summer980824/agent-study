@@ -1,5 +1,5 @@
 import httpx
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, PrivateAttr, model_validator
 
 
 class GitHubAPIError(Exception):
@@ -10,31 +10,39 @@ class GitHubClient(BaseModel):
     base_url: str
     token: str = ""
 
-    @model_validator(mode="after")
-    def _strip_trailing_slash(self):
-        self.base_url = self.base_url.rstrip("/")
-        return self
+    _client: httpx.Client = PrivateAttr()
 
-    def _session(self) -> httpx.Client:
+    @model_validator(mode="after")
+    def _build_client(self):
+        self.base_url = self.base_url.rstrip("/")
         headers = {
             "Accept": "application/vnd.github+json",
             "User-Agent": "agent-study",
         }
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
-        return httpx.Client(base_url=self.base_url,
-                            headers=headers,
-                            timeout=10)
+        self._client = httpx.Client(
+            base_url=self.base_url,
+            headers=headers,
+            timeout=10,
+        )
+        return self
 
     def http_get(self, path: str, params: dict | None = None) -> httpx.Response:
         try:
-            with self._session() as s:
-                r = s.get(path, params=params)
-                r.raise_for_status()
-                return r
+            r = self._client.get(path, params=params)
+            r.raise_for_status()
+            return r
         except httpx.HTTPStatusError as e:
-            raise GitHubAPIError(
-                f"{e.response.status_code} {path}: {e.response.text[:200]} retry-after: {e.response.headers.get("Retry-After")}"
-            ) from e
+            retry_after = e.response.headers.get("Retry-After")
+            message = (
+                f"{e.response.status_code} {path}: "
+                f"{e.response.text[:200]} "
+                f"retry-after: {retry_after}"
+            )
+            raise GitHubAPIError(message) from e
         except httpx.RequestError as e:
             raise GitHubAPIError(f"网络错误 {path}: {e}") from e
+
+    def close(self) -> None:
+        self._client.close()
