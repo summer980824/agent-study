@@ -8,25 +8,6 @@ from agent_study.async_client import (
     AsyncGitHubClient,
 )
 
-
-client = GitHubClient(base_url="https://api.github.com")
-
-try:
-    r = client.http_get("/users/summer980824")
-    user = GithubUser.from_content(r.json())
-    print(user.model_dump())
-except GitHubAPIError as e:
-    print("请求失败:", e)
-
-
-try:
-    r = client.http_get("/users/summer92222")
-    user = GithubUser.from_content(r.json())
-    print(user.model_dump())
-except GitHubAPIError as e:
-    print("请求失败:", e)
-
-
 async def test_async() -> None:
     started = perf_counter()
 
@@ -54,5 +35,30 @@ async def test_async() -> None:
     except AsyncGitHubAPIError as exc:
         print(f"GitHub API error: {exc}")
 
-print("Start test async")
-asyncio.run(test_async())
+
+
+
+def main() -> None:
+    # 这里调用同步和异步演示函数
+    print("Start test async")
+    asyncio.run(test_async())
+
+
+if __name__ == "__main__":
+    
+    client = GitHubClient(base_url="https://api.github.com")
+
+    try:
+        r = client.http_get("/users/summer980824")
+        user = GithubUser.from_content(r.json())
+        print(user.model_dump())
+
+        r = client.http_get("/users/summer92222")
+        user = GithubUser.from_content(r.json())
+        print(user.model_dump())
+    except GitHubAPIError as e:
+        print("请求失败:", e)
+    finally:
+        client.close()
+
+    main()
