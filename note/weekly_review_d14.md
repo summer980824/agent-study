@@ -34,7 +34,11 @@
 2. 韧性层：用装饰器组合，而不是塞进业务代码
 模型 API：retry 在 429/5xx/超时，不重试 4xx（除了 408/429）。
 向量 API：retry + 客户端并发信号量（asyncio.Semaphore(N)）控制 embedding 批大小。
-业务 API：GET 重试；POST/PUT 必须带 Idempotency-Key，否则只重试 5xx。
+业务 API：
+HTTP 语义层：PUT 定义为幂等（多次执行效果一致），POST 默认不保证；
+应用语义层：即使 PUT，如果服务端实现成"自增计数"也未必幂等；
+5xx 不能直接判定"服务端未执行"：网络抖动、服务端崩溃都可能让请求已处理但响应丢失；
+真正的判定标准：服务端是否对同一请求做了去重（基于 Idempotency-Key、请求指纹，或操作自然幂等）。
 3. 适配器层：每个上游一个 Protocol + 实现
 ModelClient 的 stream 返回 AsyncIterator，不是 await——这样上层能在 token到达时就往用户推送。
 VectorClient 同时暴露 embed 和 search，因为检索前要先 embedding，组合成一个原子操作更易控。
@@ -43,7 +47,7 @@ BusinessClient 用 pydantic 校验响应，422/字段错误直接抛业务异常
 5. 配置：在 config.py 里给每个上游独立分组，而不是一个扁平字典
 
 容易踩的坑
-1. 没有 timeout——任何一个上游抽风都会拖死整个请求。httpx.AsyncClient 不设 timeout 默认很长，必须显式给。
+1. 没有 timeout——任何一个上游抽风都会拖死整个请求。httpx.AsyncClient 不设 timeout 默认会在 5 秒网络无活动后触发超时，必须显式给。
 2. 重试非幂等写——业务 API 的 POST 没有 idempotency key 时只重试网络层错误，不重试 5xx。
 3. Embedding 没用信号量——向量服务 QPS 限制很严，一波并发上去直接 429，要用 asyncio.Semaphore 限并发。
 4. 每个请求 new 一个 AsyncClient——TCP/TLS 握手和连接池失效，吞吐和延迟都崩。

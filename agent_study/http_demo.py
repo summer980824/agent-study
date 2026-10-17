@@ -17,6 +17,7 @@ async def test_async() -> None:
                 client.get_json("/users/summer980824"),
                 client.get_json("/users/octocat"),
                 client.get_json("/users/torvalds"),
+                return_exceptions=True
             )
 
         users = [
