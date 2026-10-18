@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
+from time import time
 from typing import Any
 
 import httpx
@@ -50,8 +52,6 @@ class AsyncGitHubRateLimitError(AsyncGitHubAPIError):
         """距离配额重置的秒数，若 ``reset_at`` 缺失则返回 ``None``。"""
         if self.reset_at is None:
             return None
-        from time import time
-
         return max(0.0, float(self.reset_at) - time())
 
 
@@ -78,11 +78,18 @@ class RateLimitInfo:
         return self.remaining == 0
 
 
+_IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+_MAX_RETRY_DELAY = 60.0
+_EXP_BACKOFF_BASE = 1.0
+
+
 class AsyncGitHubClient:
     def __init__(
         self,
         base_url: str = "https://api.github.com",
         timeout: float = 10.0,
+        max_retries: int = 0,
     ) -> None:
         self._client = httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
@@ -93,13 +100,58 @@ class AsyncGitHubClient:
             },
         )
         self.last_rate_limit: RateLimitInfo | None = None
+        self._max_retries = max(0, max_retries)
 
-    async def get_json(self, path: str) -> dict[str, Any]:
+    async def get_json(
+        self,
+        path: str,
+        *,
+        max_retries: int | None = None,
+    ) -> dict[str, Any]:
+        return await self._request_idempotent(
+            "GET", path, max_retries=max_retries
+        )
+
+    async def _request_idempotent(
+        self,
+        method: str,
+        path: str,
+        *,
+        max_retries: int | None,
+    ) -> dict[str, Any]:
+        method = method.upper()
+        if method not in _IDEMPOTENT_METHODS:
+            raise ValueError(
+                f"Refusing to retry non-idempotent method: {method}"
+            )
+
+        attempts_allowed = (
+            self._max_retries if max_retries is None
+            else max(0, max_retries)
+        )
+        last_exc: AsyncGitHubRateLimitError | None = None
+
+        for attempt in range(attempts_allowed + 1):
+            try:
+                return await self._send_request(method, path)
+            except AsyncGitHubRateLimitError as exc:
+                last_exc = exc
+                if attempt >= attempts_allowed:
+                    raise
+                delay = self._compute_retry_delay(exc, attempt)
+                await asyncio.sleep(delay)
+
+        assert last_exc is not None
+        raise last_exc
+
+    async def _send_request(
+        self, method: str, path: str
+    ) -> dict[str, Any]:
         if self._client.is_closed:
             raise RuntimeError("AsyncGitHubClient is closed")
 
         try:
-            response = await self._client.get(path)
+            response = await self._client.request(method, path)
             self.last_rate_limit = RateLimitInfo.from_headers(
                 response.headers
             )
@@ -120,11 +172,28 @@ class AsyncGitHubClient:
             ) from exc
 
         if not isinstance(data, dict):
-            raise AsyncGitHubAPIError(
-                "Expected a JSON object"
-            )
+            raise AsyncGitHubAPIError("Expected a JSON object")
 
         return data
+
+    @staticmethod
+    def _compute_retry_delay(
+        exc: AsyncGitHubRateLimitError, attempt: int
+    ) -> float:
+        """选择最合适的退避时长：``retry_after`` > ``reset_in`` > 指数退避。
+
+        所有路径都会被 ``_MAX_RETRY_DELAY`` 截断，避免一次 sleep 几小时。
+        """
+        if exc.retry_after is not None and exc.retry_after > 0:
+            return min(exc.retry_after, _MAX_RETRY_DELAY)
+
+        if exc.reset_in is not None and exc.reset_in > 0:
+            return min(exc.reset_in, _MAX_RETRY_DELAY)
+
+        return min(
+            _EXP_BACKOFF_BASE * (2 ** attempt),
+            _MAX_RETRY_DELAY,
+        )
 
     @staticmethod
     def _classify_http_error(
@@ -161,6 +230,10 @@ class AsyncGitHubClient:
     @property
     def closed(self) -> bool:
         return self._client.is_closed
+
+    @property
+    def max_retries(self) -> int:
+        return self._max_retries
 
     async def __aenter__(self) -> "AsyncGitHubClient":
         return self

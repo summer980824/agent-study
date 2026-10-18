@@ -1,10 +1,17 @@
 import asyncio
+import logging
+import uuid
 from time import perf_counter
 
 from agent_study.async_client import AsyncGitHubClient
+from agent_study.logging_config import (
+    configure_logging,
+    request_context,
+)
 
+logger = logging.getLogger("agent_study.async_limited_demo")
 
-MAX_CONCURRENCY = 1
+MAX_CONCURRENCY = 3
 
 USERNAMES = [
     "summer980824",
@@ -22,29 +29,72 @@ async def fetch_user(
     semaphore: asyncio.Semaphore,
     stats: dict[str, int],
 ) -> dict:
-    async with semaphore:
-        # 记录当前进入请求区域的任务数
-        stats["active"] += 1
-        stats["max_active"] = max(
-            stats["max_active"],
-            stats["active"],
-        )
+    request_id = uuid.uuid4().hex
 
-        try:
-            data = await client.get_json(
-                f"/users/{username}"
+    async with semaphore:
+        with request_context(request_id):
+            started = perf_counter()
+            # 记录当前进入请求区域的任务数
+            stats["active"] += 1
+            stats["max_active"] = max(
+                stats["max_active"],
+                stats["active"],
             )
 
-            return {
-                "login": data["login"],
-                "public_repos": data["public_repos"],
-            }
+            try:
+                logger.info(
+                    "GitHub API request started",
+                    extra={
+                        "event": "api_request_started",
+                        "username": username,
+                    },
+                )
+                data = await client.get_json(
+                    f"/users/{username}"
+                )
+                logger.info(
+                    "GitHub API request completed",
+                    extra={
+                        "event": "api_request_completed",
+                        "username": username,
+                        "duration_ms": round(
+                            (perf_counter() - started) * 1000,
+                            2,
+                        ),
+                        "status_code": 200,
+                    },
+                )
 
-        finally:
-            stats["active"] -= 1
+                return {
+                    "login": data["login"],
+                    "public_repos": data["public_repos"],
+                }
+            except Exception as exc:
+                logger.exception(
+                    "GitHub API request failed",
+                    extra={
+                        "event": "api_request_failed",
+                        "username": username,
+                        "duration_ms": round(
+                            (perf_counter() - started) * 1000,
+                            2,
+                        ),
+                        "error_type": type(exc).__name__,
+                    },
+                )
+                raise
+            finally:
+                stats["active"] -= 1
 
 
 async def main() -> None:
+    configure_logging()
+
+    logger.info(
+        "Async GitHub demo started",
+        extra={"event": "demo_started"},
+    )
+
     semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
 
     stats = {
