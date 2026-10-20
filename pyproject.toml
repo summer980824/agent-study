@@ -8,14 +8,28 @@ dependencies = [
     "httpx>=0.28.1",
     "pydantic>=2.14.0",
     "pydantic-settings>=2.15.0",
-    "pytest>=9.1.1",
-    "pytest-asyncio>=0.24.0",
     "python-dotenv>=1.2.4",
-    "respx>=0.22.0",
+    "typer>=0.27.3",
 ]
 
 [dependency-groups]
-dev = []
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=0.24.0",
+    "respx>=0.22.0",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+pythonpath = ["."]
+
+
+[project.scripts]
+agent-study = "agent_study.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+package = true

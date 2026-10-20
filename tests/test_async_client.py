@@ -6,6 +6,7 @@ retry tests so the suite stays fast and we can assert exact backoff values.
 """
 from __future__ import annotations
 
+from dataclasses import FrozenInstanceError
 from time import time
 
 import httpx
@@ -148,7 +149,7 @@ class TestRateLimitInfo:
 
     def test_is_frozen(self):
         info = RateLimitInfo(60, 0, None, 60)
-        with pytest.raises((AttributeError, Exception)):
+        with pytest.raises(FrozenInstanceError):
             info.limit = 10  # type: ignore[misc]
 
 
