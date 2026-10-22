@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import tempfile
 from pathlib import Path
 from urllib.error import HTTPError
 
@@ -36,7 +37,12 @@ tasks_app = typer.Typer(
 app.add_typer(github_app, name="github")
 app.add_typer(tasks_app, name="tasks")
 
-DEFAULT_TASK_FILE = Path("agent_study") / "task.txt"
+PACKAGE_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = PACKAGE_DIR.parent
+
+# 任务文件默认放在用户数据目录：与 CWD 无关，也不会写进 git 工作区。
+USER_DATA_DIR = Path.home() / ".agent-study"
+DEFAULT_TASK_FILE = USER_DATA_DIR / "tasks.txt"
 
 
 def _mask(secret: str) -> str:
@@ -81,11 +87,14 @@ def demo() -> None:
     user_2 = User(id=1002, name="Tom")
     user_2.add_task("learn sth")
 
-    file_path = DEFAULT_TASK_FILE
-    task_module.save_tasks(user_1.pending_tasks(), file_path)
-    print(task_module.load_tasks(file_path))
-    task_module.append_task("adhoc task", file_path)
-    print(task_module.load_tasks(file_path))
+    # 演示用的任务文件放在临时目录，既不污染 git 工作区，
+    # 也不会覆盖用户自己的任务清单。
+    with tempfile.TemporaryDirectory(prefix="agent-study-demo-") as tmp_dir:
+        file_path = Path(tmp_dir) / "task.txt"
+        task_module.save_tasks(user_1.pending_tasks(), file_path)
+        print(task_module.load_tasks(file_path))
+        task_module.append_task("adhoc task", file_path)
+        print(task_module.load_tasks(file_path))
 
     user_3 = User.load('{"id": 1003, "name": "Jack"}')
     try:
@@ -208,8 +217,13 @@ def tasks_add(
     ),
 ) -> None:
     """向任务文件追加一条任务。"""
-    task_module.append_task(title, task_file)
-    typer.echo(f"已添加: {title}")
+    try:
+        task_module.append_task(title, task_file)
+    except ValueError as e:
+        typer.secho(f"Error: {e}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+
+    typer.echo(f"已添加: {title.strip()}")
 
 
 def main() -> None:

@@ -1,3 +1,0 @@
-learn RAG
-learn Agent
-adhoc task

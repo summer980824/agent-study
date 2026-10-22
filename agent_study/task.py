@@ -19,4 +19,6 @@ def load_tasks(file_path: Path | str) -> list[str]:
 
 
 def append_task(title: str, file_path: Path | str) -> None:
-    util.append_file(file_path, title + "\n")
+    if not title.strip():
+        raise ValueError("title cannot be blank")
+    util.append_file(file_path, title.strip() + "\n")

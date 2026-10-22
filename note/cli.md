@@ -96,9 +96,9 @@ CLI 的中间态便宜得多：**不用常驻服务、不用做前端、不用�
 | 命令 | 体现的价值 |
 | --- | --- |
 | `agent-study --help` | 默认无副作用；入口自描述 |
-| `agent-study demo` | 本地演示不联网；与线上能力解耦 |
+| `agent-study demo` | 本地演示不联网；与线上能力解耦；任务文件走临时目录 |
 | `agent-study config` | 线上排障入口；密钥脱敏 |
-| `agent-study tasks list/add` | 状态文件可读写；人机共用 |
+| `agent-study tasks list/add` | 状态文件可读写；人机共用；标题非空校验 |
 | `agent-study github user <name>` | 显式联网；错误分诊后退出码非 0 |
 | `agent-study github async <n...> [--retries N]` | 并发 + 资源边界参数化；部分失败不吞 |
 
@@ -119,6 +119,26 @@ CLI 的中间态便宜得多：**不用常驻服务、不用做前端、不用�
 4. **stdout 与 stderr 分工**——stdout 是数据，stderr 是诊断。
 5. **一个子命令一件事**——子命令之间不共享状态，各自可独立测试。
 6. **业务逻辑不写在 CLI 里**——CLI 只做参数解析与调度，逻辑下沉到模块，CLI 保持薄。
+7. **路径要锚定，不能依赖 CWD**——写文件、读配置一律用绝对路径（`Path(__file__).resolve().parent` 或用户数据目录），否则同一个命令在项目根跑和在别处跑会读写到不同的文件。
+8. **写操作要落在工作区之外**——默认写到用户数据目录（`~/.agent-study/`）或临时目录，不要默认写进被 git 跟踪的项目文件，否则跑一次演示就脏一次工作区。
+9. **输入要在入口就校验**——空标题、纯空白这类垃圾数据应该在入口被拒掉（退出码非 0），而不是写进存储之后再由下游发现。
+
+### 关于第 7、8 条的实战例子
+
+重构前这个项目的任务文件写死成 `Path("agent_study") / "task.txt"`——相对路径，依赖当前工作目录；而且 `agent_study/task.txt` 是被 git 跟踪的，`demo` 每跑一次就往里追加一行 `adhoc task`，工作区永远是脏的。
+
+改法：
+
+```python
+PACKAGE_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = PACKAGE_DIR.parent
+USER_DATA_DIR = Path.home() / ".agent-study"
+DEFAULT_TASK_FILE = USER_DATA_DIR / "tasks.txt"   # 与 CWD 无关，也在 git 工作区之外
+```
+
+`demo` 更进一步，用 `tempfile.TemporaryDirectory()` 起一个临时目录，退出时自动清理——演示数据不落盘，更不碰用户自己的任务清单。
+
+这类问题的共同点是：**CLI 的默认行为会变成用户工作区的一部分**。默认值不是"随便挑一个"，它会被用户继承、被 CI 继承、被 Agent 继承。
 
 ## 面试问题
 

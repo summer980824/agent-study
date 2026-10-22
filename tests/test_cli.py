@@ -188,41 +188,79 @@ class TestHelp:
 
 
 class TestDemo:
-    def test_demo_runs_successfully(
-        self,
-        runner: CliRunner,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ):
-        monkeypatch.setattr(
-            cli, "DEFAULT_TASK_FILE", tmp_path / "task.txt"
-        )
+    def test_demo_runs_successfully(self, runner: CliRunner):
         result = runner.invoke(cli.app, ["demo"])
         assert result.exit_code == 0
         assert "Add tasks complete" in result.stdout
 
-    def test_demo_writes_tasks_to_the_given_file(
-        self,
-        runner: CliRunner,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
+    def test_demo_uses_a_temporary_task_file(self, runner: CliRunner):
+        """演示的任务文件必须在临时目录里，不能落在项目或用户数据目录。"""
+        result = runner.invoke(cli.app, ["demo"])
+        assert result.exit_code == 0
+        assert "learn RAG" in result.stdout
+
+    def test_demo_does_not_touch_the_project_tree(
+        self, runner: CliRunner
     ):
-        target = tmp_path / "task.txt"
-        monkeypatch.setattr(cli, "DEFAULT_TASK_FILE", target)
+        """demo 不得在项目目录里留下任何文件改动。"""
+        project_root = Path(__file__).resolve().parent.parent
+
+        def _snapshot() -> dict[Path, int]:
+            return {
+                path: path.stat().st_mtime_ns
+                for path in project_root.rglob("*.txt")
+                if ".venv" not in path.parts
+            }
+
+        before = _snapshot()
         runner.invoke(cli.app, ["demo"])
-        assert target.exists()
-        assert "learn RAG" in target.read_text(encoding="utf-8")
+        assert _snapshot() == before
+
+    def test_demo_writes_only_outside_the_project_tree(
+        self, runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+    ):
+        """直接拦截写文件调用，断言 demo 的落盘目标都在项目目录之外。"""
+        from agent_study import util
+
+        written: list[Path] = []
+        real_write = util.write_file
+        real_append = util.append_file
+
+        def spy_write(file_path, str_txt):
+            written.append(Path(file_path).resolve())
+            return real_write(file_path, str_txt)
+
+        def spy_append(file_path, str_txt):
+            written.append(Path(file_path).resolve())
+            return real_append(file_path, str_txt)
+
+        monkeypatch.setattr(util, "write_file", spy_write)
+        monkeypatch.setattr(util, "append_file", spy_append)
+
+        result = runner.invoke(cli.app, ["demo"])
+
+        assert result.exit_code == 0
+        assert written, "demo 应该演示了文件写入"
+        project_root = cli.PROJECT_ROOT.resolve()
+        for path in written:
+            assert project_root not in path.parents, path
+
+    def test_demo_does_not_touch_the_default_task_file(
+        self, runner: CliRunner
+    ):
+        default = cli.DEFAULT_TASK_FILE
+        existed = default.exists()
+        content = default.read_bytes() if existed else None
+        runner.invoke(cli.app, ["demo"])
+        if existed:
+            assert default.read_bytes() == content
+        else:
+            assert not default.exists()
 
     def test_demo_makes_no_network_call(
-        self,
-        runner: CliRunner,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
+        self, runner: CliRunner, monkeypatch: pytest.MonkeyPatch
     ):
         _forbid_network(monkeypatch)
-        monkeypatch.setattr(
-            cli, "DEFAULT_TASK_FILE", tmp_path / "task.txt"
-        )
         result = runner.invoke(cli.app, ["demo"])
         assert result.exit_code == 0
 
@@ -327,6 +365,45 @@ class TestTasks:
         assert result.exit_code == 1
         assert "任务文件不存在" in result.stderr
 
+    def test_add_rejects_blank_title(
+        self, runner: CliRunner, task_file: Path
+    ):
+        result = runner.invoke(
+            cli.app, ["tasks", "add", "", "-f", str(task_file)]
+        )
+        assert result.exit_code == 1
+        assert "Error" in result.stderr
+        assert not task_file.exists()
+
+    def test_add_rejects_whitespace_only_title(
+        self, runner: CliRunner, task_file: Path
+    ):
+        result = runner.invoke(
+            cli.app, ["tasks", "add", "   ", "-f", str(task_file)]
+        )
+        assert result.exit_code == 1
+        assert "Error" in result.stderr
+        assert not task_file.exists()
+
+    def test_add_strips_the_title(
+        self, runner: CliRunner, task_file: Path
+    ):
+        result = runner.invoke(
+            cli.app, ["tasks", "add", "  learn Rust  ", "-f", str(task_file)]
+        )
+        assert result.exit_code == 0
+        assert task_file.read_text(encoding="utf-8").strip() == "learn Rust"
+
+    def test_add_creates_missing_parent_directories(
+        self, runner: CliRunner, tmp_path: Path
+    ):
+        nested = tmp_path / "a" / "b" / "tasks.txt"
+        result = runner.invoke(
+            cli.app, ["tasks", "add", "nested", "-f", str(nested)]
+        )
+        assert result.exit_code == 0
+        assert nested.read_text(encoding="utf-8").strip() == "nested"
+
     def test_tasks_makes_no_network_call(
         self, runner: CliRunner, task_file: Path, monkeypatch: pytest.MonkeyPatch
     ):
@@ -338,6 +415,54 @@ class TestTasks:
             cli.app, ["tasks", "list", "-f", str(task_file)]
         )
         assert result.exit_code == 0
+
+
+# ---------------------------------------------------------------------------
+# 路径锚定
+# ---------------------------------------------------------------------------
+
+
+class TestPathAnchoring:
+    def test_default_task_file_is_absolute(self):
+        assert cli.DEFAULT_TASK_FILE.is_absolute()
+
+    def test_default_task_file_does_not_depend_on_cwd(self, tmp_path: Path):
+        """换工作目录不应改变默认任务文件的位置。"""
+        before = cli.DEFAULT_TASK_FILE
+        cwd = Path.cwd()
+        try:
+            os.chdir(tmp_path)
+            assert cli.DEFAULT_TASK_FILE == before
+        finally:
+            os.chdir(cwd)
+
+    def test_default_task_file_is_outside_the_project_tree(self):
+        project_root = cli.PROJECT_ROOT.resolve()
+        assert project_root not in cli.DEFAULT_TASK_FILE.resolve().parents
+
+    def test_package_dir_is_anchored_to_the_source_file(self):
+        assert cli.PACKAGE_DIR == Path(cli.__file__).resolve().parent
+        assert cli.PROJECT_ROOT == cli.PACKAGE_DIR.parent
+
+
+# ---------------------------------------------------------------------------
+# task.append_task 的领域校验
+# ---------------------------------------------------------------------------
+
+
+class TestAppendTaskValidation:
+    def test_blank_title_raises_value_error(self, tmp_path: Path):
+        from agent_study import task as task_module
+
+        with pytest.raises(ValueError, match="blank"):
+            task_module.append_task("   ", tmp_path / "t.txt")
+
+    def test_title_is_stripped_before_storing(self, tmp_path: Path):
+        from agent_study import task as task_module
+
+        target = tmp_path / "t.txt"
+        task_module.append_task("  learn Rust  ", target)
+        assert target.read_text(encoding="utf-8") == "learn Rust\n"
 
 
 # ---------------------------------------------------------------------------
