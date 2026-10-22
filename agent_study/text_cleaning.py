@@ -3,7 +3,7 @@
 A small pipeline for normalizing raw text into clean paragraphs:
 
 * :func:`normalize_text` — unify Unicode representation and newlines
-* :func:`clean_text` — strip control characters and tidy whitespace
+* :func:`clean_text` — strip control / invisible characters and tidy whitespace
 * :func:`split_text` — split into paragraphs, dropping empty ones
 * :func:`preprocess_text` — run the whole pipeline, returning paragraphs
 """
@@ -14,9 +14,13 @@ import re
 import unicodedata
 
 # C0/C1 control characters minus the ones we keep: \n and \r (\r is
-# unified into \n by ``normalize_text`` before cleaning happens).
-_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
-_INLINE_WHITESPACE = re.compile(r"[ \t\xa0]+")
+# unified into \n by ``normalize_text`` before cleaning happens), plus
+# invisible format characters that pollute embeddings and tokenizers:
+# BOM (ZERO WIDTH NO-BREAK SPACE) and ZERO WIDTH SPACE.
+_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\ufeff\u200b]")
+# Inline whitespace: ASCII space, tab, NO-BREAK SPACE, and the ideographic
+# space common in CJK documents.
+_INLINE_WHITESPACE = re.compile(r"[ \t\xa0\u3000]+")
 _BLANK_LINES = re.compile(r"\n{3,}")
 _PARAGRAPH_BOUNDARY = re.compile(r"\n{2,}")
 
@@ -34,8 +38,10 @@ def normalize_text(text: str) -> str:
 def clean_text(text: str) -> str:
     """清理控制字符、多余空白和冗余空行。
 
-    Removes C0/C1 control characters (keeping newline), collapses
-    runs of inline whitespace (spaces, tabs, no-break spaces) to a single
+    Removes C0/C1 control characters and invisible format characters
+    (BOM, zero-width space), keeping newline; collapses
+    runs of inline whitespace (spaces, tabs, no-break spaces, ideographic
+    spaces) to a single
     space, collapses runs of blank
     lines to a single blank line, and trims leading/trailing newlines.
     """

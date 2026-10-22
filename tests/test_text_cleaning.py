@@ -18,12 +18,14 @@ from agent_study.text_cleaning import (
 
 class TestNormalizeText:
     def test_combining_sequence_becomes_composed(self):
-        decomposed = "café"  # e + combining acute
-        assert normalize_text(decomposed) == "café"
-        assert normalize_text("cafe\u0301") == normalize_text("café")
+        decomposed = "cafe\u0301"  # e + combining acute
+        assert normalize_text(decomposed) == "café"  # precomposed form
+        assert normalize_text(decomposed) == normalize_text("café")
 
-    def test_nfc_normalizes_full_width_variants(self):
-        assert normalize_text("ＡＢＣ") == "ＡＢＣ"  # already NFC; must not crash
+    def test_nfc_does_not_fold_full_width_characters(self):
+        # Width folding (Ａ -> A) is NFKC's job, not NFC's; NFC must leave
+        # full-width characters untouched.
+        assert normalize_text("ＡＢＣ") == "ＡＢＣ"
 
     def test_crlf_becomes_lf(self):
         assert normalize_text("a\r\nb\r\nc") == "a\nb\nc"
@@ -49,8 +51,17 @@ class TestCleanText:
     def test_collapses_tabs_to_a_single_space(self):
         assert clean_text("a\t\tb") == "a b"
 
+    def test_collapses_ideographic_space(self):
+        assert clean_text("中文　　文本") == "中文 文本"
+
     def test_removes_vertical_tab_and_form_feed(self):
         assert clean_text("a\x0bb\x0cc") == "abc"
+
+    def test_removes_bom(self):
+        assert clean_text("\ufeffhello") == "hello"
+
+    def test_removes_zero_width_space(self):
+        assert clean_text("he\u200bllo") == "hello"
 
     def test_collapses_inline_whitespace(self):
         assert clean_text("a   b\t\t c") == "a b c"
