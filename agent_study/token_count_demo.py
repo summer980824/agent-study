@@ -23,7 +23,7 @@ def main() -> None:
                 "text": text,
                 "characters": n_chars,
                 "tokens": n_tokens,
-                "tokens_per_char": round(n_tokens / n_chars, 4),
+                "tokens_per_char": round(n_tokens / n_chars, 4) if n_chars else None,
             }
         )
     print(json.dumps(results, ensure_ascii=False, indent=2))
