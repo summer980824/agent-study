@@ -2,7 +2,7 @@ import tiktoken
 
 
 def count_tokens(
-    text: str,
+    text: str | None,
     encoding_name: str = "cl100k_base",
 ) -> int:
     """返回指定编码下的 Token 数量。"""
