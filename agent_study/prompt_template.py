@@ -1,8 +1,4 @@
-from agent_study.text_cleaning import clean_text, normalize_text
-
-
-def _clean_prompt_part(text: str) -> str:
-    return clean_text(normalize_text(text))
+from agent_study.text_cleaning import clean_prompt_text
 
 
 def build_prompt(
@@ -10,9 +6,9 @@ def build_prompt(
     context: str,
     output_format: str,
 ) -> str:
-    instruction = _clean_prompt_part(instruction)
-    context = _clean_prompt_part(context)
-    output_format = _clean_prompt_part(output_format)
+    instruction = clean_prompt_text(instruction)
+    context = clean_prompt_text(context)
+    output_format = clean_prompt_text(output_format)
 
     if not instruction:
         raise ValueError("instruction must not be empty")

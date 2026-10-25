@@ -9,6 +9,7 @@ end-to-end ``preprocess_text`` pass over a messy input.
 from __future__ import annotations
 
 from agent_study.text_cleaning import (
+    clean_prompt_text,
     clean_text,
     normalize_text,
     preprocess_text,
@@ -77,6 +78,15 @@ class TestCleanText:
 
     def test_empty_input_stays_empty(self):
         assert clean_text("") == ""
+
+
+class TestCleanPromptText:
+    def test_preserves_all_internal_whitespace(self):
+        raw = " \r\na  b\t \r\n\r\n\r\n  c  \r\n "
+        assert clean_prompt_text(raw) == "a  b\t \n\n\n  c"
+
+    def test_normalizes_and_removes_control_characters(self):
+        assert clean_prompt_text(" \x00cafe\u0301\ufeff\r\n") == "café"
 
 
 class TestSplitText:

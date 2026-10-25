@@ -14,7 +14,7 @@ def test_build_prompt_returns_markdown_sections():
     )
 
 
-def test_build_prompt_cleans_outer_and_inner_whitespace():
+def test_build_prompt_preserves_internal_whitespace():
     result = build_prompt(
         "  First line\n    indented line  ",
         "\nAlpha  beta\n\nGamma\n",
@@ -23,9 +23,9 @@ def test_build_prompt_cleans_outer_and_inner_whitespace():
 
     assert result == (
         "## Instruction\n\n"
-        "First line\nindented line\n\n"
+        "First line\n    indented line\n\n"
         "## Context\n\n"
-        "Alpha beta\n\nGamma\n\n"
+        "Alpha  beta\n\nGamma\n\n"
         "## Output Format\n\n"
         "key: value"
     )
@@ -40,11 +40,28 @@ def test_build_prompt_cleans_all_inputs():
 
     assert result == (
         "## Instruction\n\n"
-        "café\nSecond line\n\n"
+        "café \n  Second\t line\n\n"
         "## Context\n\n"
-        "Alpha beta\n\nGamma\n\n"
+        "Alpha\t\t beta\n\n\nGamma\n\n"
         "## Output Format\n\n"
         "JSON"
+    )
+
+
+def test_build_prompt_preserves_code_and_json_layout():
+    result = build_prompt(
+        "\ndef main():\n    if True:\n\t\tprint('hi')  \n\n\nmain()\n",
+        '\n{\n    "name": "A  B",\n    "active": true\n\n\n}\n',
+        '\n```json\n{\n    "sentiment": "positive"\n}\n```\n',
+    )
+
+    assert result == (
+        "## Instruction\n\n"
+        "def main():\n    if True:\n\t\tprint('hi')  \n\n\nmain()\n\n"
+        "## Context\n\n"
+        '{\n    "name": "A  B",\n    "active": true\n\n\n}\n\n'
+        "## Output Format\n\n"
+        '```json\n{\n    "sentiment": "positive"\n}\n```'
     )
 
 

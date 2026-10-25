@@ -3,6 +3,7 @@
 A small pipeline for normalizing raw text into clean paragraphs:
 
 * :func:`normalize_text` — unify Unicode representation and newlines
+* :func:`clean_prompt_text` — clean prompt text while preserving internal layout
 * :func:`clean_text` — strip control / invisible characters and tidy whitespace
 * :func:`split_text` — split into paragraphs, dropping empty ones
 * :func:`preprocess_text` — run the whole pipeline, returning paragraphs
@@ -33,6 +34,12 @@ def normalize_text(text: str) -> str:
     """
     text = unicodedata.normalize("NFC", text)
     return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def clean_prompt_text(text: str) -> str:
+    """清理输入并保留内部布局。"""
+    text = normalize_text(text)
+    return _CONTROL_CHARS.sub("", text).strip()
 
 
 def clean_text(text: str) -> str:
