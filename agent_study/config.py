@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     MODEL_NAME: str
     API_KEY: str
     API_BASE_URL: str
+    # Anthropic 兼容端点（如 https://api.minimax.cn/anthropic），留空则回退到 API_BASE_URL
+    ANTHROPIC_BASE_URL: str = ""
 
 
 settings = Settings()

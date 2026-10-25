@@ -5,6 +5,7 @@ description = "Senior Java Developer → AI Agent Engineer"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "anthropic>=2.3.0",
     "httpx>=0.28.1",
     "pydantic>=2.14.0",
     "pydantic-settings>=2.15.0",
