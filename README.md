@@ -53,12 +53,15 @@ print(chat("用一句话解释 Agent", reasoning_effort="low"))
 
 配置来自项目根目录的 `.env` 与 `.env.dev`（`APP_ENV` 环境变量可切换，默认 `dev`）：
 
-| 变量 | 说明 |
-| --- | --- |
-| `MODEL_NAME` | 模型名，如 `MiniMax-M3.1-Flash` |
-| `API_KEY` | MiniMax 订阅 Key，缺失或无效会返回 `401 invalid api key` |
-| `API_BASE_URL` | OpenAI 兼容接口地址，如 `https://api.minimax.cn/v1` |
-| `ANTHROPIC_BASE_URL` | Anthropic 兼容接口地址，如 `https://api.minimax.cn/anthropic`，留空则回退到 `API_BASE_URL` |
+| 变量 | 说明 | 留空时的默认值 |
+| --- | --- | --- |
+| `MODEL_NAME` | 模型名 | `MiniMax-M3.1-Flash` |
+| `API_KEY` | MiniMax 订阅 Key，**必填**；缺失或无效会返回 `401 invalid api key` | 无（留空即报错） |
+| `API_BASE_URL` | OpenAI 兼容接口地址，`llm_client` 用 | `https://api.minimax.io/v1` |
+| `ANTHROPIC_BASE_URL` | Anthropic 兼容接口地址，`anthropic_chat` 用 | `https://api.minimax.io/anthropic` |
+
+配置项写成空值（`KEY=`）等同于不配置，按上表的默认值走。
+两个 base_url 是**两种协议**，不能互相顶替：给 Anthropic 端点填 OpenAI 兼容地址会 404。
 
 ### 说明
 
@@ -105,3 +108,30 @@ print(message.stop_reason, message.usage)
 - `chat()` 只返回正文文本；`chat_message()` 返回完整的 `Message`，可以拿到 `stop_reason` 和 `usage`。
 - `stop_reason` 要检查：`max_tokens` 表示输出被截断，但 HTTP 状态码仍是 200。
 - MiniMax 的 Anthropic 端点对 `temperature` / `top_p` 暂不生效，`stop_sequences` / `top_k` 会被忽略。
+- Anthropic Messages API（SDK 2.3.0）已经没有具名的 `temperature` 参数，本模块通过 `extra_body` 透传，兼容网关能收下，Anthropic 官方模型可能直接 400。
+
+## 两个 client 的公共参数
+
+两个 `chat()` 签名一致，都支持 `temperature` 和 `max_completion_tokens`，换用支持这些参数的模型时直接传即可：
+
+```python
+from agent_study.llm_client import chat as oai_chat
+from agent_study.anthropic_chat import chat as ant_chat
+
+oai_chat("用一句话解释 Agent", temperature=0.3, max_completion_tokens=600)
+ant_chat("用一句话解释 Agent", temperature=0.3, max_completion_tokens=600)
+```
+
+- 不传时这两个字段**不会**出现在请求体里，避免把模型不支持的参数发到线上。
+- Anthropic 侧的 `max_completion_tokens` 会映射到协议的 `max_tokens`，语义一致（都把思考 token 算进输出预算）。
+
+## 测试
+
+```bash
+uv run pytest -q
+```
+
+两个 client 的 mock 测试在 `tests/test_llm_client.py` 和 `tests/test_anthropic_chat.py`，不联网。
+
+> `anthropic` SDK 底层用的是 `httpx2`，而 `respx` 只支持 `httpx` v1，
+> 所以 Anthropic 侧用的是 `httpx2` 自带的 `MockTransport` 打桩。

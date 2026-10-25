@@ -14,8 +14,10 @@
 
 运行前在 ``.env.dev`` 里配置好 ``API_KEY``（MiniMax 订阅 Key）；
 ``API_BASE_URL`` 留空则使用官方地址。
-"""
 
+``temperature`` 与 ``max_completion_tokens`` 默认都不发送，
+换用支持它们的模型（如 OpenAI 官方模型）时再显式传。
+"""
 from __future__ import annotations
 
 import httpx
@@ -30,8 +32,15 @@ def chat(
     api_key: str = "",
     model: str = settings.MODEL_NAME,
     reasoning_effort: str | None = None,
+    temperature: float | None = None,
+    max_completion_tokens: int | None = None,
     timeout: float = 120.0,
 ) -> str:
+    """调用 OpenAI 兼容的 chat completions 接口，返回正文文本。
+
+    ``temperature`` 与 ``max_completion_tokens`` 为 ``None`` 时不会出现在请求体里，
+    避免把模型不支持的参数发到线上。
+    """
     url = (
         f"{(base_url or settings.API_BASE_URL).rstrip('/')}"
         "/chat/completions"
@@ -42,6 +51,10 @@ def chat(
     }
     if reasoning_effort:
         payload["reasoning_effort"] = reasoning_effort
+    if temperature is not None:
+        payload["temperature"] = temperature
+    if max_completion_tokens is not None:
+        payload["max_completion_tokens"] = max_completion_tokens
 
     headers = {"Authorization": f"Bearer {api_key or settings.API_KEY}"}
     with httpx.Client(timeout=timeout) as client:
@@ -53,4 +66,3 @@ def chat(
         data = response.json()
 
     return str(data["choices"][0]["message"]["content"])
-

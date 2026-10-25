@@ -63,6 +63,7 @@ def _fake_config_module(
     *,
     model_name: str = "gpt-4o-mini",
     api_base_url: str = "https://api.example.com",
+    anthropic_base_url: str = "https://api.example.com/anthropic",
     api_key: str = "sk-secret-abcdef1234",
 ) -> None:
     """Install a stand-in for ``agent_study.config`` so tests do not need .env."""
@@ -70,6 +71,7 @@ def _fake_config_module(
     module.settings = types.SimpleNamespace(
         MODEL_NAME=model_name,
         API_BASE_URL=api_base_url,
+        ANTHROPIC_BASE_URL=anthropic_base_url,
         API_KEY=api_key,
     )
     monkeypatch.setitem(sys.modules, "agent_study.config", module)
@@ -280,6 +282,7 @@ class TestConfig:
         payload = json.loads(result.stdout)
         assert payload["MODEL_NAME"] == "gpt-4o-mini"
         assert payload["API_BASE_URL"] == "https://api.example.com"
+        assert payload["ANTHROPIC_BASE_URL"] == "https://api.example.com/anthropic"
 
     def test_config_masks_api_key(
         self, runner: CliRunner, monkeypatch: pytest.MonkeyPatch

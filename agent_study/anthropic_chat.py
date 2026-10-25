@@ -21,7 +21,10 @@ system 提示词           ``messages[0].role=system``      顶层 ``system`` �
     print(chat("用一句话解释 Agent"))
 
 运行前在 ``.env.dev`` 里配置好 ``API_KEY``（MiniMax 订阅 Key）；
-``ANTHROPIC_BASE_URL`` 留空则回退到 ``API_BASE_URL``。
+``ANTHROPIC_BASE_URL`` 留空则使用官方地址。
+
+``temperature`` 与 ``max_completion_tokens`` 默认都不发送（``max_tokens`` 除外，
+它是 Anthropic 协议的必填项），换用支持它们的模型时再显式传。
 """
 
 from __future__ import annotations
@@ -42,29 +45,48 @@ def chat_message(
     api_key: str = "",
     model: str = settings.MODEL_NAME,
     reasoning_effort: str | None = None,
-    max_tokens: int = DEFAULT_MAX_TOKENS,
+    temperature: float | None = None,
+    max_completion_tokens: int | None = None,
     timeout: float = 120.0,
 ) -> anthropic.types.Message:
     """调用 Anthropic Messages API，返回完整响应（含 ``stop_reason`` 和 ``usage``）。
+
+    ``max_completion_tokens`` 对应 Anthropic 协议的 ``max_tokens``（两者都把
+    思考 token 算进输出预算）；不传时用 :data:`DEFAULT_MAX_TOKENS` 兜底，
+    因为该字段在 Anthropic 协议里是必填的。
+
+    ``temperature`` 走 ``extra_body`` 透传：Anthropic Messages API 已经不再提供
+    这个具名参数，只有兼容网关（如 MiniMax）才会收下它。
 
     ``stop_reason`` 必须检查：值为 ``max_tokens`` 表示输出被截断，
     此时正文是半截的，但 HTTP 状态码仍然是 200。
     """
     client = anthropic.Anthropic(
         api_key=api_key or settings.API_KEY,
-        base_url=base_url or settings.ANTHROPIC_BASE_URL or settings.API_BASE_URL,
+        base_url=base_url or settings.ANTHROPIC_BASE_URL,
         timeout=timeout,
     )
 
     kwargs: dict[str, object] = {
         "model": model,
-        "max_tokens": max_tokens,
+        "max_tokens": (
+            max_completion_tokens
+            if max_completion_tokens is not None
+            else DEFAULT_MAX_TOKENS
+        ),
         "messages": [{"role": "user", "content": prompt}],
     }
     if system:
         kwargs["system"] = system
     if reasoning_effort:
         kwargs["output_config"] = {"effort": reasoning_effort}
+    if temperature is not None:
+        # Anthropic Messages API（SDK 2.3.0 / api version 2026-10-21）已经没有
+        # 具名的 temperature 参数了，只能靠 extra_body 原样透传给服务端。
+        # 兼容网关（如 MiniMax）会收下但忽略；Anthropic 官方模型可能直接 400。
+        extra_body = dict(kwargs.get("extra_body") or {})
+        extra_body["temperature"] = temperature
+        kwargs["extra_body"] = extra_body
 
     try:
         return client.messages.create(**kwargs)  # type: ignore[arg-type]
@@ -82,7 +104,8 @@ def chat(
     api_key: str = "",
     model: str = settings.MODEL_NAME,
     reasoning_effort: str | None = None,
-    max_tokens: int = DEFAULT_MAX_TOKENS,
+    temperature: float | None = None,
+    max_completion_tokens: int | None = None,
     timeout: float = 120.0,
 ) -> str:
     """调用 Anthropic Messages API，返回正文文本。
@@ -98,7 +121,8 @@ def chat(
         api_key=api_key,
         model=model,
         reasoning_effort=reasoning_effort,
-        max_tokens=max_tokens,
+        temperature=temperature,
+        max_completion_tokens=max_completion_tokens,
         timeout=timeout,
     )
     return "".join(block.text for block in message.content if block.type == "text")

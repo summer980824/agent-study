@@ -130,6 +130,7 @@ def config() -> None:
             {
                 "MODEL_NAME": settings.MODEL_NAME,
                 "API_BASE_URL": settings.API_BASE_URL,
+                "ANTHROPIC_BASE_URL": settings.ANTHROPIC_BASE_URL,
                 "API_KEY": _mask(settings.API_KEY),
             },
             indent=2,
