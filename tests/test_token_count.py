@@ -23,3 +23,16 @@ def test_empty_string_returns_zero_tokens():
 
 def test_none_returns_zero_tokens():
     assert count_tokens(None) == 0
+
+
+def test_whitespace_only_string_preserves_token_count():
+    assert count_tokens(" \t\n") == 1
+
+
+def test_o200k_base_encoding():
+    assert count_tokens("hello world", encoding_name="o200k_base") == 2
+
+
+def test_invalid_encoding_name_raises_value_error():
+    with pytest.raises(ValueError, match="Unknown encoding"):
+        count_tokens("text", encoding_name="not-a-real-encoding")
