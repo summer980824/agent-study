@@ -44,9 +44,12 @@ uv run agent_study/llm_client_demo.py          # 以脚本方式运行（等价�
 在代码中直接调用：
 
 ```python
-from agent_study.llm_client import chat
+from agent_study.llm_client import chat, chat_response
 
 print(chat("用一句话解释 Agent", reasoning_effort="low"))
+
+response = chat_response("用一句话解释 Agent")   # 需要 finish_reason / usage 时用这个
+print(response.content, response.finish_reason, response.usage)
 ```
 
 ### 配置
@@ -68,6 +71,7 @@ print(chat("用一句话解释 Agent", reasoning_effort="low"))
 - `reasoning_effort` 只接受小写 `low` / `medium` / `high` / `xhigh` / `max`，省略时服务端按 `max` 处理。
 - 思考过程在 `reasoning_content` 字段，`chat()` 只返回 `content` 中的最终答案。
 - `temperature` / `top_p` 当前不生效：传什么都不报错，但服务端固定按 `temperature=1`、`top_p=0.95` 处理。
+- 响应会做结构校验：结构不对抛 `LLMResponseError`，被输出上限截断（`finish_reason == "length"`）抛 `LLMResponseTruncatedError`，不会把半截答案当成完整答案返回。
 
 ## 运行 Anthropic SDK 示例
 

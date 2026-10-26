@@ -177,7 +177,7 @@ p_i = exp(z_i / T) / Σ_j exp(z_j / T)
 | `max_output_tokens` | Responses API | 语义同上，覆盖 reasoning token、可见输出 token、以及不可见的格式 token |
 
 **结论：Chat Completions 用 `max_completion_tokens`，不要再用 `max_tokens`。**
-本项目的最小调用函数只暴露 `prompt`，压根不会发这个过时参数——避免把它悄悄发到线上、等到 o 系列模型报 400 才发现。
+本项目的最小调用函数压根不会发这个过时参数——避免把它悄悄发到线上、等到 o 系列模型报 400 才发现。
 
 ### 3.2 它和上下文窗口的关系
 
@@ -296,8 +296,10 @@ Chat Completions 引入了 `messages`（带 role 的多轮对话）、`tools`（
 
 请求：`model`（必填）、`messages`（必填）、外加生成参数（`temperature`、`max_completion_tokens`、`n`、`stop`、`seed`、`response_format` 等）。
 响应最该看三处：`choices[0].message.content`（正文）、`choices[0].finish_reason`（为什么停）、`usage`（真实 token 用量，计费依据）。
-本项目 `agent_study/llm_client.py` 里的最小函数 `chat()` 只返回 `content` 文本；
-要拿 `finish_reason` / `usage`，需要直接读响应 JSON（`data["choices"][0]["finish_reason"]`、`data["usage"]`）。
+本项目 `agent_study/llm_client.py` 里：`chat_response()` 返回 `ChatResponse`
+（`content` + `finish_reason` + `usage` + `truncated`），`chat()` 只返回 `content` 文本，
+但会在响应被截断（`finish_reason == "length"`）时抛 `LLMResponseTruncatedError`——
+半截答案不该被当成完整答案往上层传。
 
 ### Q: temperature 到底做了什么？
 

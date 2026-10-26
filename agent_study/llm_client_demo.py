@@ -1,9 +1,24 @@
-from agent_study.llm_client import chat
+from agent_study.llm_client import chat_structured
+from agent_study.structured_output import TaskSchema
 
 
 def main() -> None:
-    response = chat(prompt="今天三清山天气如何？", reasoning_effort="low")
-    print(response)
+    # 自由文本 -> 结构化任务：模型需要自己抽取字段，不是抄输入
+    note = (
+        "下周三之前把三清山这几天的天气查一下，"
+        "把气温、降水和风力整理成一段，发到项目群里，大概半小时能搞定。"
+    )
+    task = chat_structured(prompt=note, reasoning_effort="low")
+    print(task.model_dump_json(indent=2))
+
+    # JSON 输入 -> 结构化任务：输入字段和 schema 不同名，模型需要做映射
+    payload = {
+        "summary": "查三清山天气并发群",
+        "deadline": "下周三",
+        "effort_minutes": 30,
+    }
+    task2 = chat_structured(prompt=payload, reasoning_effort="low")
+    print(task2.model_dump_json(indent=2))
 
 
 if __name__ == "__main__":
