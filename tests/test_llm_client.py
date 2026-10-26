@@ -13,12 +13,16 @@ import respx
 from pydantic import BaseModel, Field
 
 from agent_study.llm_client import (
+    ChatResponse,
     LLMResponseError,
     LLMResponseTruncatedError,
     LLMStructuredOutputError,
+    _get_client,
     chat,
     chat_response,
     chat_structured,
+    chat_structured_response,
+    close_client,
 )
 from agent_study.structured_output import TaskSchema
 
@@ -491,7 +495,7 @@ class TestChatStructuredRequest:
         assert _body(route)["response_format"] == {"type": "json_object"}
 
 
-class TestChatStructuredResponse:
+class TestChatStructuredResult:
     @respx.mock
     def test_returns_validated_model_instance(self):
         respx.post(f"{BASE_URL}/chat/completions").mock(
@@ -503,6 +507,15 @@ class TestChatStructuredResponse:
         assert task.priority == "high"
         assert task.estimated_minutes == 60
         assert task.tags == ["docs"]
+
+    @respx.mock
+    def test_returns_only_the_model_without_response_metadata(self):
+        respx.post(f"{BASE_URL}/chat/completions").mock(
+            return_value=_structured_response(json.dumps(TASK_JSON))
+        )
+        task = chat_structured("写周报", base_url=BASE_URL, api_key="k", model="m")
+        assert isinstance(task, TaskSchema)
+        assert task.title == "写周报"
 
     @respx.mock
     def test_accepts_json_wrapped_in_markdown_fence(self):
@@ -583,3 +596,99 @@ class TestChatStructuredResponse:
         )
         with pytest.raises(RuntimeError, match="API 401"):
             chat_structured("写周报", base_url=BASE_URL, api_key="bad", model="m")
+
+
+class TestChatStructuredResponse:
+    @respx.mock
+    def test_returns_model_instance_and_chat_response(self):
+        respx.post(f"{BASE_URL}/chat/completions").mock(
+            return_value=_structured_response(json.dumps(TASK_JSON))
+        )
+        task, response = chat_structured_response(
+            "写周报", base_url=BASE_URL, api_key="k", model="m"
+        )
+        assert isinstance(task, TaskSchema)
+        assert task.title == "写周报"
+        assert isinstance(response, ChatResponse)
+
+    @respx.mock
+    def test_exposes_finish_reason_and_usage(self):
+        respx.post(f"{BASE_URL}/chat/completions").mock(
+            return_value=_structured_response(json.dumps(TASK_JSON))
+        )
+        _, response = chat_structured_response(
+            "写周报", base_url=BASE_URL, api_key="k", model="m"
+        )
+        assert response.finish_reason == "stop"
+        assert response.usage == {"total_tokens": 30}
+        assert response.truncated is False
+
+    @respx.mock
+    def test_truncated_response_raises_truncated_error(self):
+        respx.post(f"{BASE_URL}/chat/completions").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "choices": [
+                        {
+                            "index": 0,
+                            "finish_reason": "length",
+                            "message": {"role": "assistant", "content": '{"title"'},
+                        }
+                    ]
+                },
+            )
+        )
+        with pytest.raises(LLMResponseTruncatedError, match="截断"):
+            chat_structured_response(
+                "写周报", base_url=BASE_URL, api_key="k", model="m"
+            )
+
+    @respx.mock
+    def test_chat_structured_returns_the_same_instance(self):
+        respx.post(f"{BASE_URL}/chat/completions").mock(
+            return_value=_structured_response(json.dumps(TASK_JSON))
+        )
+        instance, _ = chat_structured_response(
+            "写周报", base_url=BASE_URL, api_key="k", model="m"
+        )
+        task = chat_structured("写周报", base_url=BASE_URL, api_key="k", model="m")
+        assert task == instance
+
+
+# ---------------------------------------------------------------------------
+# 共享 HTTP 客户端
+# ---------------------------------------------------------------------------
+
+
+class TestSharedHttpClient:
+    def test_client_instance_is_reused(self):
+        assert _get_client() is _get_client()
+
+    def test_close_client_closes_and_allows_a_new_client(self):
+        first = _get_client()
+        close_client()
+        assert first.is_closed
+        second = _get_client()
+        assert second is not first
+        close_client()
+
+    @respx.mock
+    def test_requests_do_not_create_a_client_each_time(self, monkeypatch):
+        created: list[httpx.Client] = []
+        original_init = httpx.Client.__init__
+
+        def counting_init(self, *args, **kwargs):
+            created.append(self)
+            original_init(self, *args, **kwargs)
+
+        monkeypatch.setattr(httpx.Client, "__init__", counting_init)
+        close_client()
+        respx.post(f"{BASE_URL}/chat/completions").mock(
+            return_value=_ok_response()
+        )
+        chat("嗨", base_url=BASE_URL, api_key="k", model="m")
+        chat("嗨", base_url=BASE_URL, api_key="k", model="m")
+        close_client()
+        assert len(created) == 1
+

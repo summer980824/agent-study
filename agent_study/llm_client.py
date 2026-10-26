@@ -22,6 +22,14 @@
     task = chat_structured({"summary": "写周报", "minutes": 60})
     print(task.title, task.priority, task.estimated_minutes)
 
+需要同时拿到响应元信息（``finish_reason`` / ``usage``）时用
+:func:`chat_structured_response`：
+
+    from agent_study.llm_client import chat_structured_response
+
+    task, response = chat_structured_response({"summary": "写周报"})
+    print(task.title, response.finish_reason, response.usage)
+
 运行前在 ``.env.dev`` 里配置好 ``API_KEY``（MiniMax 订阅 Key）；
 ``API_BASE_URL`` 留空则使用官方地址。
 
@@ -77,6 +85,34 @@ class ChatResponse:
     def truncated(self) -> bool:
         """正文是否因为撞到输出上限而被截断。"""
         return self.finish_reason == "length"
+
+
+_shared_client: httpx.Client | None = None
+
+
+def _get_client() -> httpx.Client:
+    """取共享的 HTTP 客户端，进程内只建一次。
+
+    每个请求新建 client 会丢掉连接池，每次都要重新握手；
+    共享一个 client 才能复用 keep-alive 连接。``httpx.Client`` 本身是
+    线程安全的，可以直接跨线程共用。
+    """
+    global _shared_client
+    if _shared_client is None:
+        _shared_client = httpx.Client()
+    return _shared_client
+
+
+def close_client() -> None:
+    """关闭共享的 HTTP 客户端。
+
+    不调用也能正常工作（进程退出时连接会被回收），
+    提前关闭可以及时释放套接字。
+    """
+    global _shared_client
+    if _shared_client is not None:
+        _shared_client.close()
+        _shared_client = None
 
 
 def chat_response(
@@ -150,7 +186,7 @@ def chat(
     return response.content
 
 
-def chat_structured(
+def chat_structured_response(
     prompt: str | dict[str, Any] | list[Any],
     *,
     schema: type[ModelT] = TaskSchema,  # type: ignore[assignment]
@@ -163,8 +199,12 @@ def chat_structured(
     max_completion_tokens: int | None = None,
     response_format: str | None = None,
     timeout: float = 120.0,
-) -> ModelT:
-    """让模型按 JSON Schema 输出，并返回校验后的模型实例。
+) -> tuple[ModelT, ChatResponse]:
+    """让模型按 JSON Schema 输出，返回校验后的模型实例和原始响应元信息。
+
+    返回 ``(instance, response)``：``instance`` 是按 ``schema`` 校验过的
+    Pydantic 对象，``response`` 是 :class:`ChatResponse`，带有
+    ``finish_reason`` 和 ``usage``。
 
     ``prompt`` 既可以是字符串，也可以是 JSON 可序列化的 dict / list（任务数据），
     后者会被序列化后连同 JSON Schema 一起发给模型。
@@ -208,12 +248,49 @@ def chat_structured(
 
     data = _extract_json_object(response.content)
     try:
-        return schema.model_validate(data)
+        instance = schema.model_validate(data)
     except ValidationError as e:
         raise LLMStructuredOutputError(
             f"模型输出不符合 {schema.__name__}：{e.error_count()} 处错误，"
             f"原文：{response.content[:200]!r}"
         ) from e
+
+    return instance, response
+
+
+def chat_structured(
+    prompt: str | dict[str, Any] | list[Any],
+    *,
+    schema: type[ModelT] = TaskSchema,  # type: ignore[assignment]
+    instruction: str = "",
+    base_url: str = "",
+    api_key: str = "",
+    model: str = settings.MODEL_NAME,
+    reasoning_effort: str | None = None,
+    temperature: float | None = None,
+    max_completion_tokens: int | None = None,
+    response_format: str | None = None,
+    timeout: float = 120.0,
+) -> ModelT:
+    """让模型按 JSON Schema 输出，并返回校验后的模型实例。
+
+    :func:`chat_structured_response` 的便捷包装，只返回模型实例；
+    需要 ``finish_reason`` / ``usage`` 时改用那个函数。
+    """
+    instance, _ = chat_structured_response(
+        prompt,
+        schema=schema,
+        instruction=instruction,
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+        reasoning_effort=reasoning_effort,
+        temperature=temperature,
+        max_completion_tokens=max_completion_tokens,
+        response_format=response_format,
+        timeout=timeout,
+    )
+    return instance
 
 
 def _build_payload(
@@ -254,13 +331,14 @@ def _post(
 ) -> object:
     """发送请求并返回已解析的 JSON body。"""
     headers = {"Authorization": f"Bearer {api_key or settings.API_KEY}"}
-    with httpx.Client(timeout=timeout) as client:
-        response = client.post(url, json=payload, headers=headers)
-        if response.status_code >= 400:
-            raise RuntimeError(
-                f"API {response.status_code}: {response.text[:300]}"
-            )
-        return response.json()
+    response = _get_client().post(
+        url, json=payload, headers=headers, timeout=timeout
+    )
+    if response.status_code >= 400:
+        raise RuntimeError(
+            f"API {response.status_code}: {response.text[:300]}"
+        )
+    return response.json()
 
 
 def _build_structured_content(

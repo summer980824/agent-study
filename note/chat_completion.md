@@ -281,6 +281,7 @@ Chat Completions 对应的是 `finish_reason=length`。
 - [ ] 需要可复现时用 `seed` + 记录 `system_fingerprint` + 固定模型版本
 - [ ] 推理模型为 reasoning 预留足够 token（官方建议起步 25,000）
 - [ ] 密钥只走请求头，不进日志
+- [ ] 复用 HTTP 客户端（连接池），不要每个请求新建一个 client
 
 ---
 
@@ -300,6 +301,8 @@ Chat Completions 引入了 `messages`（带 role 的多轮对话）、`tools`（
 （`content` + `finish_reason` + `usage` + `truncated`），`chat()` 只返回 `content` 文本，
 但会在响应被截断（`finish_reason == "length"`）时抛 `LLMResponseTruncatedError`——
 半截答案不该被当成完整答案往上层传。
+结构化输出同理：`chat_structured()` 只返回模型实例，
+`chat_structured_response()` 返回 `(模型实例, ChatResponse)`，两条路共用同一套校验。
 
 ### Q: temperature 到底做了什么？
 

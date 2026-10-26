@@ -52,6 +52,17 @@ response = chat_response("用一句话解释 Agent")   # 需要 finish_reason / 
 print(response.content, response.finish_reason, response.usage)
 ```
 
+结构化输出：
+
+```python
+from agent_study.llm_client import chat_structured, chat_structured_response
+
+task = chat_structured("把这段会议记录整理成一个任务")   # 只返回模型实例
+
+task, response = chat_structured_response("把这段会议记录整理成一个任务")
+print(task.title, response.finish_reason, response.usage)   # 同时拿到响应元信息
+```
+
 ### 配置
 
 配置来自项目根目录的 `.env` 与 `.env.dev`（`APP_ENV` 环境变量可切换，默认 `dev`）：

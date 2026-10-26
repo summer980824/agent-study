@@ -42,7 +42,7 @@
 | 自由文本 | 抽取 + 推断 | 信息抽取 |
 
 所以 `chat_structured` 的输入应该是**原始素材**，不是一条已经填好的记录。
-同时给了 `instruction` 参数（`llm_client.py:46` `DEFAULT_STRUCTURED_INSTRUCTION`），
+同时给了 `instruction` 参数（`llm_client.py:54` `DEFAULT_STRUCTURED_INSTRUCTION`），
 默认指令是「根据输入内容抽取并填写对象，信息缺失时按输入合理推断，不要原样照抄输入」——
 指令放在 schema 之前，先说清"做什么"再说"按什么格式"。
 
@@ -85,11 +85,32 @@ def not_blank(cls, v: str) -> str:
 | 响应结构 | `choices` / `message` / `content` 是否存在、`finish_reason` | `LLMResponseError`（含截断、内容过滤的特化子类） |
 | 业务 schema | 字段齐不齐、类型、`priority` 枚举、`estimated_minutes` 范围 | `LLMStructuredOutputError` |
 
-顺序也有讲究：**先**判断截断和内容过滤（`llm_client.py:199`），**再**解析 JSON，最后才校验 schema。
+顺序也有讲究：**先**判断截断和内容过滤（`llm_client.py:239`），**再**解析 JSON，最后才校验 schema。
 被截断的输出即使恰好是合法 JSON，也是半截的，不该被当成有效结果。
 
 另外，**只有输出校验，输入不校验**。`prompt` 传的是原始素材，本来就不该符合 schema，
 把它当 schema 校验会直接拒掉。
+
+### 坑四：结构化结果和响应元信息要一起拿
+
+`chat_structured()` 原来只返回校验后的模型实例，`finish_reason` 和 `usage` 就丢了。
+但这两个字段恰恰是成本和正确性的唯一依据（见 `note/chat_completion.md`）：
+`usage` 用来记账，`finish_reason` 用来发现"看起来成功、其实是半截"的输出。
+
+现在的分工是两个入口，共用同一套校验逻辑：
+
+| 函数 | 返回 | 用在哪 |
+|---|---|---|
+| `chat_structured()` | 模型实例 | 只关心业务字段 |
+| `chat_structured_response()` | `(模型实例, ChatResponse)` | 还要记账、判断截断 |
+
+`chat_structured()` 是 `chat_structured_response()` 的便捷包装，抛错行为完全一致：
+截断 → `LLMResponseTruncatedError`，内容过滤 → `LLMResponseError`，
+JSON 非法或不符合 schema → `LLMStructuredOutputError`。
+
+顺带一个 HTTP 层的坑：**每个请求新建 `httpx.Client` 等于每次重新握手**，
+连接池一点都复用不上。客户端改成进程内共享一个实例（`_get_client()`），
+超时按请求传（`timeout=` 是 httpx 的 per-request 参数），需要提前释放连接时调 `close_client()`。
 
 ### 局限
 
@@ -144,8 +165,8 @@ def not_blank(cls, v: str) -> str:
 
 ### 4. 无效 JSON 和字段校验失败应该如何处理
 
-- **无效 JSON / 不是对象** → 抛 `LLMStructuredOutputError`（`llm_client.py:311` `_extract_json_object`）。
-- **字段校验失败** → 同样抛 `LLMStructuredOutputError`（`llm_client.py:211` `model_validate`），错误信息带原文片段便于排查。
+- **无效 JSON / 不是对象** → 抛 `LLMStructuredOutputError`（`llm_client.py:389` `_extract_json_object`）。
+- **字段校验失败** → 同样抛 `LLMStructuredOutputError`（`llm_client.py:251` `model_validate`），错误信息带原文片段便于排查。
 - **铁律：不要 `except` 之后返回默认值或 `None` 继续跑**——那等于把显式失败换成了静默降级
   （就是上面「只完成结构化的一半」那个坑）。
 - **更好的做法（当前未实现）**：把校验错误回喂给模型让它自己改一遍，重试 N 次；并区分
