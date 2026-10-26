@@ -112,6 +112,21 @@ JSON 非法或不符合 schema → `LLMStructuredOutputError`。
 连接池一点都复用不上。客户端改成进程内共享一个实例（`_get_client()`），
 超时按请求传（`timeout=` 是 httpx 的 per-request 参数），需要提前释放连接时调 `close_client()`。
 
+### 坑五：多余字段要么拒掉，要么别留
+
+Pydantic 默认 `extra="ignore"`：模型多吐一个 `due_date`，校验照样通过，
+但这个字段**不会被存进实例**，读的时候才发现"我以为它在了"。
+
+契约的第一条是"字段就是这些"，所以 `TaskSchema` 改成 `extra="forbid"`：
+
+| 行为 | `extra="ignore"`（默认） | `extra="forbid"`（现在） |
+|---|---|---|
+| 模型多输出一个字段 | 校验通过，字段被丢掉 | 校验失败，抛 `LLMStructuredOutputError` |
+| 生成的 JSON Schema | 无约束 | 带 `additionalProperties: false`，提示词也收紧 |
+
+注意这是"应用层软约束"的一部分：`additionalProperties: false` 写进提示词只是**告诉**模型别多给，
+真正拦住它的是 Pydantic 的校验——模型不听话时，是校验抛异常，不是提示词在保证。
+
 ### 局限
 
 1. **这是应用层的软约束，不是解码层的硬约束。**

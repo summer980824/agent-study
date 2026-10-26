@@ -191,6 +191,34 @@ class TestEstimatedMinutes:
 
 
 # ---------------------------------------------------------------------------
+# 多余字段（extra="forbid"）
+# ---------------------------------------------------------------------------
+
+
+class TestExtraFields:
+    def test_rejects_an_unknown_field(self):
+        with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+            _valid(due_date="2026-10-26")
+
+    def test_error_points_at_the_offending_field(self):
+        with pytest.raises(ValidationError) as excinfo:
+            _valid(due_date="2026-10-26")
+        assert excinfo.value.errors()[0]["loc"] == ("due_date",)
+        assert excinfo.value.errors()[0]["type"] == "extra_forbidden"
+
+    def test_rejects_an_unknown_field_even_when_the_rest_is_valid(self):
+        with pytest.raises(ValidationError):
+            TaskSchema.model_validate({**VALID, "unknown": 1})
+
+    def test_extra_fields_are_not_kept_on_the_instance(self):
+        task = _valid()
+        assert "due_date" not in task.model_dump()
+
+    def test_json_schema_forbids_additional_properties(self):
+        assert TaskSchema.model_json_schema()["additionalProperties"] is False
+
+
+# ---------------------------------------------------------------------------
 # JSON Schema（提示词就是靠它生成的）
 # ---------------------------------------------------------------------------
 

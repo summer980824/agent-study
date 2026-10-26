@@ -424,6 +424,15 @@ class TestChatStructuredRequest:
         assert "priority" in content
 
     @respx.mock
+    def test_message_forbids_additional_properties(self):
+        route = respx.post(f"{BASE_URL}/chat/completions").mock(
+            return_value=_structured_response(json.dumps(TASK_JSON))
+        )
+        chat_structured("写周报", base_url=BASE_URL, api_key="k", model="m")
+        content = _body(route)["messages"][0]["content"]
+        assert '"additionalProperties": false' in content
+
+    @respx.mock
     def test_json_string_prompt_is_treated_as_json_input(self):
         route = respx.post(f"{BASE_URL}/chat/completions").mock(
             return_value=_structured_response(json.dumps(TASK_JSON))
@@ -564,6 +573,15 @@ class TestChatStructuredResult:
     @respx.mock
     def test_schema_violation_raises(self):
         bad = dict(TASK_JSON, priority="urgent")
+        respx.post(f"{BASE_URL}/chat/completions").mock(
+            return_value=_structured_response(json.dumps(bad))
+        )
+        with pytest.raises(LLMStructuredOutputError, match="不符合 TaskSchema"):
+            chat_structured("写周报", base_url=BASE_URL, api_key="k", model="m")
+
+    @respx.mock
+    def test_extra_field_raises(self):
+        bad = dict(TASK_JSON, due_date="2026-10-26")
         respx.post(f"{BASE_URL}/chat/completions").mock(
             return_value=_structured_response(json.dumps(bad))
         )
