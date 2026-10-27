@@ -10,6 +10,8 @@ def main() -> None:
     print()
     print("finish_reason:", stream.result.finish_reason)
     print("usage:", stream.result.usage)
+    # done_received 为 False 说明没收到 [DONE]：流可能中途断了，正文只有半截
+    print("done_received:", stream.done_received)
 
     # 自由文本 -> 结构化任务：模型需要自己抽取字段，不是抄输入
     note = (

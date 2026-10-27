@@ -41,6 +41,7 @@ class ChatResult:
     finish_reason: str = ""
     usage: dict[str, Any] = field(default_factory=dict)
     reasoning_content: str = ""
+    done_received: bool = False
 ```
 
 与原来的 `ChatResponse` 的区别：
@@ -51,6 +52,12 @@ class ChatResult:
 - 新增 `reasoning_content`：模块文档明确写了 OpenAI 兼容协议下思考内容在
   `reasoning_content` 字段。流式下丢弃思考增量会静默吞掉 token，所以单独累加，
   同步路径 `_parse_response` 也一并填充。
+- 新增 `done_received`：**只表示"收到了 SSE 的 `[DONE]` 终止标记"**，仅流式有意义。
+  它解决的是"正文吐完了但流断了"这个第三状态 —— 服务端可能给完
+  `finish_reason="stop"` 就断连接，也可能压根不发 `[DONE]`（部分兼容端）。
+  只看 `finish_reason` 判断不了正文是否完整。
+  同步调用不经 SSE，恒为 False —— 它的完整性由"整个 body 一次解析成功"保证，
+  解析不了会直接抛异常。
 
 `ChatResponse = ChatResult` 作为兼容别名。
 
@@ -79,6 +86,8 @@ stream = chat_stream("用一句话解释 Agent", api_key="...")
 for delta in stream:
     print(delta, end="", flush=True)
 print(stream.result.content, stream.result.finish_reason, stream.result.usage)
+if not stream.done_received:
+    print("流没有正常收尾，正文可能不完整")
 ```
 
 `ChatStream` 的约定：
@@ -88,6 +97,9 @@ print(stream.result.content, stream.result.finish_reason, stream.result.usage)
 - `close()`：调用方 `break` 出循环后可主动释放连接，不必等 GC 回收生成器
 - `.result` 是**同一个对象**，流进行中 `content` / `reasoning_content` 实时累加，
   `finish_reason` / `usage` 在对应 chunk 到达时落定。迭代完成前不要把它当最终结果用
+- `.done_received`：`result.done_received` 的快捷方式，只有收到 `[DONE]` 才为 True。
+  提前 `break`、流内报错、连接中途断开时都为 False —— 这时 `finish_reason`
+  可能是 `"stop"`，但正文并不完整
 
 ## 请求
 
@@ -114,7 +126,7 @@ with _get_client().stream("POST", url, json=payload, headers=headers, timeout=ti
 1. 空行 → 跳过
 2. 不以 `data:` 开头 → 跳过（keep-alive、注释行）
 3. `data:` 后 `strip()` 为空 → 跳过
-4. `strip()` 后是 `[DONE]` → 终止
+4. `strip()` 后是 `[DONE]` → 终止，并置 `result.done_received = True`
 5. `json.loads`；解析失败 → **跳过这一行**，不中断整个流
 6. 不是 dict → 跳过
 7. 有 `error` 字段 → 抛 `RuntimeError`（流内错误不能被静默吞掉）
@@ -139,8 +151,9 @@ with _get_client().stream("POST", url, json=payload, headers=headers, timeout=ti
 - 流内 `error` 对象 → 抛 `RuntimeError`
 - `finish_reason == "length"` / `"content_filter"`：**不抛异常**，
   只体现在 `result.finish_reason` 与 `result.truncated` 上，由调用方判断
-- 流没有收到 `[DONE]` 就结束 → 不抛异常，`result.finish_reason` 保持最后一次拿到的值
-  （可能为空字符串）。空 `finish_reason` 即表示"没拿到结束原因"，多半是连接中断
+- 流没有收到 `[DONE]` 就结束 → **不抛异常**（部分兼容端本来就不发 `[DONE]`），
+  只把 `result.done_received` 留在 False。`result.finish_reason` 保持最后一次拿到的值，
+  **可能是 `"stop"`** —— 所以判断正文是否完整要看 `done_received`，不能只看 `finish_reason`
 
 ## 测试
 
@@ -167,6 +180,10 @@ SSE body 必须自带 `\n\n` 分隔符和结尾换行（`httpx.Response(text=...
 - `finish_reason == "length"` 不抛异常，`truncated is True`
 - 缺 usage → `usage == {}`
 - `reasoning_content` 增量累加到 `.result.reasoning_content`
+- 收到 `[DONE]` → `done_received is True`
+- 流在 `[DONE]` 前结束（`finish_reason` 已经是 `"stop"`）→ `done_received is False`，不抛异常
+- 调用方提前 `break` → `done_received is False`
+- 流内报错 → 异常照抛，`done_received is False`
 
 
 ## 面试题
@@ -226,7 +243,9 @@ SSE body 必须自带 `\n\n` 分隔符和结尾换行（`httpx.Response(text=...
 
 - HTTP >= 400 → 在**返回流之前**就抛（`chat_stream()` 是急切的：建连即查状态码）
 - 流内收到 `{"error": ...}` → 中途抛 `RuntimeError`
-- 收到 `[DONE]` 之外的结束 → 不抛，`finish_reason` 留空，由调用方判断
+- 流没有收到 `[DONE]` 就结束 → 不抛，只把 `done_received` 留在 False。
+  注意此时 `finish_reason` 可能已经是 `"stop"`——所以"正常结束"不能只看它，
+  必须看 `done_received`
 
 **5. 不是所有场景都该用流式**
 
@@ -283,11 +302,16 @@ response = stack.enter_context(
 
 1. **区分错误发生在流前还是流后**（决定能不能直接抛）
 2. **保留已产出的内容**（不要因为一个尾部错误把前 80% 扔掉）
-3. **明确"正常结束"的标志**（`[DONE]` / `finish_reason`）
+3. **明确"正常结束"的标志**（我们用 `[DONE]`，落成 `result.done_received`）
 
 我们选择：流式的截断和内容过滤**不抛异常**，只用 `result.truncated` /
 `result.finish_reason` 表达 —— 因为正文已经吐出去了，抛异常会把已生成的内容一起丢掉。
 这跟同步路径"截断就抛 `LLMResponseTruncatedError`"是有意的差异。
+
+同理，"没收到 `[DONE]`"也不抛，只给状态位 `result.done_received`：
+兼容端不一定发 `[DONE]`，抛了等于把兼容性换成异常。
+但**必须给这个状态位**——`finish_reason` 在断开前可能已经写成 `"stop"`，
+只看它会把半截正文误判成完整答案。
 
 **3. 取消与幂等：一个被忽略的坑**
 
@@ -372,7 +396,7 @@ response = stack.enter_context(
   实务上别承诺"流式和非流式逐字相同"。
 - **"流式中途断了怎么办？"** —— 保留已产出内容 + 标记未完成状态 +
   允许重试（带幂等键）。这就是我们代码里"没有 `[DONE]` 就不抛、
-  `finish_reason` 留空"的由来。
+  只把 `done_received` 留成 False"的由来。
 
 ---
 
@@ -385,6 +409,7 @@ response = stack.enter_context(
 | 读超时语义 | `timeout` 是每次读取的超时，不是总时长 |
 | 错误分层 | 流前 HTTP 错误抛异常 / 流内 `error` 对象抛异常 / 流未正常结束不抛 |
 | 部分成功 | 截断与内容过滤不抛，用 `result.truncated` / `finish_reason` 表达 |
+| 正常结束标志 | 只有收到 `[DONE]` 才置 `result.done_received = True`；兼容端不发 `[DONE]` 也不抛异常 |
 | 心跳/注释行 | `data:` 之外的行（keep-alive）一律跳过 |
 | 精确记账 | `include_usage=True` 才向服务端要 usage，默认关闭避免兼容端 400 |
 | 取消 | `close()` 关闭响应；真正停止上游推理要看服务端是否感知到断开 |

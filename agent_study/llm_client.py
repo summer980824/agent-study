@@ -39,6 +39,8 @@
     for delta in stream:
         print(delta, end="", flush=True)
     print(stream.result.content, stream.result.finish_reason, stream.result.usage)
+    if not stream.done_received:
+        print("流没有正常收尾，正文可能不完整")
 
 运行前在 ``.env.dev`` 里配置好 ``API_KEY``（MiniMax 订阅 Key）；
 ``API_BASE_URL`` 留空则使用官方地址。
@@ -96,6 +98,16 @@ class ChatResult:
     finish_reason: str = ""
     usage: dict[str, Any] = field(default_factory=dict)
     reasoning_content: str = ""
+    done_received: bool = False
+    """仅流式有意义：是否收到了 SSE 的 ``[DONE]`` 终止标记。
+
+    流式传输"正常结束"和"正文吐完了"是两回事：服务端可能给完了
+    ``finish_reason="stop"`` 就断连接，也可能压根不发 ``[DONE]``（部分兼容端）。
+    只有这个标志为 True 才说明整条流被完整收尾。
+
+    同步调用不经 SSE，恒为 False —— 它的完整性由"整个 body 一次解析成功"
+    来保证，解析不了会直接抛异常。
+    """
 
     @property
     def truncated(self) -> bool:
@@ -122,6 +134,9 @@ class ChatStream(Iterator[str]):
     ``finish_reason`` / ``usage`` 在对应 chunk 到达时落定 —— 迭代完成前
     不要把它当最终结果用。
 
+    迭代结束后看 :attr:`done_received` 判断流是否完整收尾：只有收到
+    ``[DONE]`` 才为 True。
+
     只能消费一次：迭代到底之后不会重新发请求。提前退出循环时调用
     :meth:`close` 释放连接。
     """
@@ -142,9 +157,22 @@ class ChatStream(Iterator[str]):
     def __next__(self) -> str:
         try:
             return next(self._events)
-        except StopIteration:
+        except BaseException:
             self.close()
             raise
+
+    @property
+    def done_received(self) -> bool:
+        """流是否收到了 ``[DONE]`` 终止标记。
+
+        False 表示流没有正常收尾：服务端没发 ``[DONE]``，或者连接在正文
+        吐完之前就断了。这时 ``result.content`` 可能只有半截，
+        ``result.finish_reason`` 也可能已经是 ``"stop"`` —— 光看它判断不了
+        正文是否完整。
+
+        兼容端不一定发 ``[DONE]``，所以这里只给状态、不抛异常。
+        """
+        return self.result.done_received
 
     def close(self) -> None:
         """关闭底层连接。可重复调用。"""
@@ -282,6 +310,11 @@ def chat_stream(
     ``"length"`` 或 ``"content_filter"`` 就抛异常 —— 正文已经吐出去了，
     抛异常会把已生成的内容一起丢掉。请自行检查
     ``stream.result.truncated`` 和 ``stream.result.finish_reason``。
+
+    迭代结束后检查 ``stream.done_received``：只有收到 ``[DONE]`` 才说明整条
+    流被完整收尾。为 False 表示服务端没发 ``[DONE]`` 或中途断连，
+    此时 ``finish_reason`` 可能是 ``"stop"`` 但正文并不完整。
+    这里只给状态、不抛异常，因为部分兼容端本来就不发 ``[DONE]``。
 
     HTTP 状态码错误（>= 400）在返回之前就会抛 :class:`RuntimeError`。
 
@@ -486,6 +519,10 @@ def _iter_sse(response: httpx.Response, result: ChatResult) -> Iterator[str]:
     ``httpx`` 不做 SSE 解析，``iter_lines()`` 按行切开，行里带 ``data:`` 前缀。
     解析顺序有讲究：先取 ``usage``，再看 ``choices`` —— 带 usage 的尾块常常
     是 ``{"choices": [], "usage": {...}}``，先校验 choices 会把它整个吃掉。
+
+    收到 ``[DONE]`` 才把 ``result.done_received`` 置为 True。流在 ``[DONE]``
+    之前结束（服务端断连、或兼容端压根不发 ``[DONE]``）时标志保持 False，
+    由调用方自行决定是丢弃还是接受这个半截结果。
     """
     for line in response.iter_lines():
         if not line or not line.startswith("data:"):
@@ -495,6 +532,7 @@ def _iter_sse(response: httpx.Response, result: ChatResult) -> Iterator[str]:
         if not payload:
             continue
         if payload == "[DONE]":
+            result.done_received = True
             break
 
         try:

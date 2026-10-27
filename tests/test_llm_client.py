@@ -1007,6 +1007,71 @@ class TestChatStreamParsing:
         assert stream.result.finish_reason == ""
 
 
+class TestChatStreamDoneMarker:
+    """``done_received`` 标志：只有收到 [DONE] 才说明流完整收尾。"""
+
+    @respx.mock
+    def test_done_received_is_true_after_done_marker(self):
+        respx.post(f"{BASE_URL}/chat/completions").mock(
+            return_value=_sse_response()
+        )
+        stream = chat_stream("嗨", base_url=BASE_URL, api_key="k", model="m")
+        list(stream)
+        assert stream.done_received is True
+        assert stream.result.done_received is True
+
+    @respx.mock
+    def test_done_received_is_false_when_stream_ends_without_done(self):
+        """兼容端不发 [DONE]：不抛异常，只给状态。"""
+        body = (
+            'data: {"choices":[{"index":0,"delta":{"content":"半"},"finish_reason":"stop"}]}\n'
+            "\n"
+        )
+        respx.post(f"{BASE_URL}/chat/completions").mock(
+            return_value=_sse_response(body)
+        )
+        stream = chat_stream("嗨", base_url=BASE_URL, api_key="k", model="m")
+        assert list(stream) == ["半"]
+        assert stream.done_received is False
+        assert stream.result.finish_reason == "stop"
+
+    @respx.mock
+    def test_done_received_is_false_when_consumer_stops_early(self):
+        """提前退出循环同样算没收尾。"""
+        respx.post(f"{BASE_URL}/chat/completions").mock(
+            return_value=_sse_response()
+        )
+        stream = chat_stream("嗨", base_url=BASE_URL, api_key="k", model="m")
+        for _ in stream:
+            break
+        stream.close()
+        assert stream.done_received is False
+
+    @respx.mock
+    def test_done_received_is_false_when_the_stream_errors_midway(self):
+        """流内报错时标志保持 False，异常照常抛出。"""
+        body = (
+            'data: {"choices":[{"index":0,"delta":{"content":"半"},"finish_reason":"stop"}]}\n'
+            "\n"
+            'data: {"error":{"message":"upstream boom"}}\n\n'
+        )
+        respx.post(f"{BASE_URL}/chat/completions").mock(
+            return_value=_sse_response(body)
+        )
+        stream = chat_stream("嗨", base_url=BASE_URL, api_key="k", model="m")
+        with pytest.raises(RuntimeError, match="upstream boom"):
+            list(stream)
+        assert stream.done_received is False
+
+    @respx.mock
+    def test_done_received_is_false_by_default(self):
+        """同步响应的 done_received 恒为 False（不经 SSE）。"""
+        respx.post(f"{BASE_URL}/chat/completions").mock(
+            return_value=_ok_response()
+        )
+        assert chat_response("嗨", base_url=BASE_URL, api_key="k", model="m").done_received is False
+
+
 class TestChatStreamErrors:
     @respx.mock
     def test_error_status_raises_runtime_error_at_call_time(self):

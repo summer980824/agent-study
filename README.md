@@ -73,6 +73,8 @@ for delta in stream:
     print(delta, end="", flush=True)
 
 print(stream.result.content, stream.result.finish_reason, stream.result.usage)
+if not stream.done_received:          # 只有收到 [DONE] 才说明流完整收尾
+    print("流没有正常收尾，正文可能不完整")
 ```
 
 ### 配置
