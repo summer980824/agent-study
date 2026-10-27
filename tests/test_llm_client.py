@@ -12,14 +12,18 @@ import pytest
 import respx
 from pydantic import BaseModel, Field
 
+from agent_study import llm_client
 from agent_study.llm_client import (
     ChatResponse,
+    ChatResult,
+    ChatStream,
     LLMResponseError,
     LLMResponseTruncatedError,
     LLMStructuredOutputError,
     _get_client,
     chat,
     chat_response,
+    chat_stream,
     chat_structured,
     chat_structured_response,
     close_client,
@@ -709,4 +713,372 @@ class TestSharedHttpClient:
         chat("嗨", base_url=BASE_URL, api_key="k", model="m")
         close_client()
         assert len(created) == 1
+
+
+# ---------------------------------------------------------------------------
+# 流式输出
+# ---------------------------------------------------------------------------
+
+SSE_BODY = (
+    'data: {"choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}\n\n'
+    'data: {"choices":[{"index":0,"delta":{"content":"你"},"finish_reason":null}]}\n\n'
+    'data: {"choices":[{"index":0,"delta":{"content":"好"},"finish_reason":null}]}\n\n'
+    'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"total_tokens":9}}\n\n'
+    "data: [DONE]\n\n"
+)
+
+
+def _sse_response(body: str = SSE_BODY, status: int = 200) -> httpx.Response:
+    """构造一个 SSE 文本流响应。
+
+    SSE body 必须自带 ``\\n\\n`` 分隔符和结尾换行，``httpx.Response(text=...)``
+    不会替我们补上。
+    """
+    return httpx.Response(
+        status,
+        text=body,
+        headers={"Content-Type": "text/event-stream"},
+    )
+
+
+class _RawStream(httpx.SyncByteStream):
+    """未经 httpx 预读的字节流，用来复现真实网络响应下 body 未读的状态。"""
+
+    def __init__(self, data: bytes) -> None:
+        self._data = data
+
+    def __iter__(self):
+        yield self._data
+
+
+class TestChatStreamRequest:
+    @respx.mock
+    def test_enables_streaming_on_the_request_body(self):
+        route = respx.post(f"{BASE_URL}/chat/completions").mock(
+            return_value=_sse_response()
+        )
+        list(chat_stream("嗨", base_url=BASE_URL, api_key="k", model="m"))
+        assert _body(route)["stream"] is True
+
+    @respx.mock
+    def test_sends_bearer_authorization_header(self):
+        route = respx.post(f"{BASE_URL}/chat/completions").mock(
+            return_value=_sse_response()
+        )
+        list(chat_stream("嗨", base_url=BASE_URL, api_key="sk-secret", model="m"))
+        assert route.calls[0].request.headers["authorization"] == "Bearer sk-secret"
+
+    @respx.mock
+    def test_asks_for_an_event_stream(self):
+        route = respx.post(f"{BASE_URL}/chat/completions").mock(
+            return_value=_sse_response()
+        )
+        list(chat_stream("嗨", base_url=BASE_URL, api_key="k", model="m"))
+        assert route.calls[0].request.headers["accept"] == "text/event-stream"
+
+    @respx.mock
+    def test_omits_stream_options_by_default(self):
+        route = respx.post(f"{BASE_URL}/chat/completions").mock(
+            return_value=_sse_response()
+        )
+        list(chat_stream("嗨", base_url=BASE_URL, api_key="k", model="m"))
+        assert "stream_options" not in _body(route)
+
+    @respx.mock
+    def test_sends_stream_options_when_include_usage(self):
+        route = respx.post(f"{BASE_URL}/chat/completions").mock(
+            return_value=_sse_response()
+        )
+        list(
+            chat_stream(
+                "嗨",
+                base_url=BASE_URL,
+                api_key="k",
+                model="m",
+                include_usage=True,
+            )
+        )
+        assert _body(route)["stream_options"] == {"include_usage": True}
+
+    @respx.mock
+    def test_sync_requests_are_not_switched_to_streaming(self):
+        """``stream`` 只加在流式请求上，不能污染同步请求体。"""
+        route = respx.post(f"{BASE_URL}/chat/completions").mock(
+            return_value=_ok_response()
+        )
+        chat("嗨", base_url=BASE_URL, api_key="k", model="m")
+        assert "stream" not in _body(route)
+
+
+class TestChatStreamResult:
+    @respx.mock
+    def test_yields_content_deltas_in_order(self):
+        respx.post(f"{BASE_URL}/chat/completions").mock(
+            return_value=_sse_response()
+        )
+        stream = chat_stream("嗨", base_url=BASE_URL, api_key="k", model="m")
+        assert list(stream) == ["你", "好"]
+
+    @respx.mock
+    def test_result_accumulates_content(self):
+        respx.post(f"{BASE_URL}/chat/completions").mock(
+            return_value=_sse_response()
+        )
+        stream = chat_stream("嗨", base_url=BASE_URL, api_key="k", model="m")
+        list(stream)
+        assert stream.result.content == "你好"
+
+    @respx.mock
+    def test_result_carries_finish_reason_and_usage(self):
+        respx.post(f"{BASE_URL}/chat/completions").mock(
+            return_value=_sse_response()
+        )
+        stream = chat_stream("嗨", base_url=BASE_URL, api_key="k", model="m")
+        list(stream)
+        assert stream.result.finish_reason == "stop"
+        assert stream.result.usage == {"total_tokens": 9}
+        assert stream.result.truncated is False
+
+    @respx.mock
+    def test_result_is_the_same_object_as_the_chat_result_type(self):
+        respx.post(f"{BASE_URL}/chat/completions").mock(
+            return_value=_sse_response()
+        )
+        stream = chat_stream("嗨", base_url=BASE_URL, api_key="k", model="m")
+        assert isinstance(stream.result, ChatResult)
+        assert ChatResponse is ChatResult
+
+    @respx.mock
+    def test_content_accumulates_while_iterating(self):
+        respx.post(f"{BASE_URL}/chat/completions").mock(
+            return_value=_sse_response()
+        )
+        stream = chat_stream("嗨", base_url=BASE_URL, api_key="k", model="m")
+        seen: list[str] = []
+        for delta in stream:
+            seen.append(delta)
+            assert stream.result.content == "".join(seen)
+
+    @respx.mock
+    def test_reasoning_content_is_accumulated_separately(self):
+        body = (
+            'data: {"choices":[{"index":0,'
+            '"delta":{"reasoning_content":"想一下"},"finish_reason":null}]}\n\n'
+            'data: {"choices":[{"index":0,"delta":{"content":"答"},"finish_reason":null}]}\n\n'
+            "data: [DONE]\n\n"
+        )
+        respx.post(f"{BASE_URL}/chat/completions").mock(
+            return_value=_sse_response(body)
+        )
+        stream = chat_stream("嗨", base_url=BASE_URL, api_key="k", model="m")
+        assert list(stream) == ["答"]
+        assert stream.result.reasoning_content == "想一下"
+        assert stream.result.content == "答"
+
+    @respx.mock
+    def test_missing_usage_becomes_empty_dict(self):
+        body = (
+            'data: {"choices":[{"index":0,"delta":{"content":"好"},"finish_reason":"stop"}]}\n\n'
+            "data: [DONE]\n\n"
+        )
+        respx.post(f"{BASE_URL}/chat/completions").mock(
+            return_value=_sse_response(body)
+        )
+        stream = chat_stream("嗨", base_url=BASE_URL, api_key="k", model="m")
+        list(stream)
+        assert stream.result.usage == {}
+
+
+class TestChatStreamParsing:
+    @respx.mock
+    def test_skips_blank_and_non_data_lines(self):
+        body = (
+            "\n"
+            ": keep-alive comment\n"
+            "event: message\n"
+            'data: {"choices":[{"index":0,"delta":{"content":"好"},"finish_reason":"stop"}]}\n'
+            "\n"
+            "data: [DONE]\n\n"
+        )
+        respx.post(f"{BASE_URL}/chat/completions").mock(
+            return_value=_sse_response(body)
+        )
+        stream = chat_stream("嗨", base_url=BASE_URL, api_key="k", model="m")
+        assert list(stream) == ["好"]
+
+    @respx.mock
+    def test_handles_data_prefix_without_a_space(self):
+        body = (
+            'data:{"choices":[{"index":0,"delta":{"content":"好"},"finish_reason":"stop"}]}\n'
+            "\n"
+            "data:[DONE]\n\n"
+        )
+        respx.post(f"{BASE_URL}/chat/completions").mock(
+            return_value=_sse_response(body)
+        )
+        stream = chat_stream("嗨", base_url=BASE_URL, api_key="k", model="m")
+        assert list(stream) == ["好"]
+        assert stream.result.finish_reason == "stop"
+
+    @respx.mock
+    def test_skips_unparsable_lines_and_keeps_going(self):
+        body = (
+            "data: {not json}\n\n"
+            'data: {"choices":[{"index":0,"delta":{"content":"好"},"finish_reason":"stop"}]}\n'
+            "\n"
+            "data: [DONE]\n\n"
+        )
+        respx.post(f"{BASE_URL}/chat/completions").mock(
+            return_value=_sse_response(body)
+        )
+        stream = chat_stream("嗨", base_url=BASE_URL, api_key="k", model="m")
+        assert list(stream) == ["好"]
+
+    @respx.mock
+    def test_usage_only_chunk_without_choices(self):
+        """OpenAI 兼容协议里带 usage 的尾块常常没有 choices，不能因此丢掉 usage。"""
+        body = (
+            'data: {"choices":[{"index":0,"delta":{"content":"好"},"finish_reason":"stop"}]}\n'
+            "\n"
+            'data: {"choices":[],"usage":{"prompt_tokens":3,"total_tokens":11}}\n'
+            "\n"
+            "data: [DONE]\n\n"
+        )
+        respx.post(f"{BASE_URL}/chat/completions").mock(
+            return_value=_sse_response(body)
+        )
+        stream = chat_stream("嗨", base_url=BASE_URL, api_key="k", model="m")
+        assert list(stream) == ["好"]
+        assert stream.result.usage == {"prompt_tokens": 3, "total_tokens": 11}
+
+    @respx.mock
+    def test_chunk_without_delta_is_skipped(self):
+        body = (
+            'data: {"choices":[{"index":0,"finish_reason":null}]}\n\n'
+            'data: {"choices":[{"index":0,"delta":null,"finish_reason":null}]}\n\n'
+            'data: {"choices":[{"index":0,"delta":{},"finish_reason":null}]}\n\n'
+            'data: {"choices":[{"index":0,"delta":{"content":"好"},"finish_reason":"stop"}]}\n'
+            "\n"
+            "data: [DONE]\n\n"
+        )
+        respx.post(f"{BASE_URL}/chat/completions").mock(
+            return_value=_sse_response(body)
+        )
+        stream = chat_stream("嗨", base_url=BASE_URL, api_key="k", model="m")
+        assert list(stream) == ["好"]
+
+    @respx.mock
+    def test_in_stream_error_payload_raises(self):
+        body = 'data: {"error":{"message":"upstream boom"}}\n\n'
+        respx.post(f"{BASE_URL}/chat/completions").mock(
+            return_value=_sse_response(body)
+        )
+        stream = chat_stream("嗨", base_url=BASE_URL, api_key="k", model="m")
+        with pytest.raises(RuntimeError, match="upstream boom"):
+            list(stream)
+
+    @respx.mock
+    def test_done_terminates_the_stream(self):
+        body = (
+            'data: {"choices":[{"index":0,"delta":{"content":"好"},"finish_reason":"stop"}]}\n'
+            "\n"
+            "data: [DONE]\n\n"
+            'data: {"choices":[{"index":0,"delta":{"content":"不该出现"},"finish_reason":null}]}\n'
+            "\n"
+        )
+        respx.post(f"{BASE_URL}/chat/completions").mock(
+            return_value=_sse_response(body)
+        )
+        stream = chat_stream("嗨", base_url=BASE_URL, api_key="k", model="m")
+        assert list(stream) == ["好"]
+
+    @respx.mock
+    def test_stream_without_done_marker_keeps_partial_content(self):
+        body = (
+            'data: {"choices":[{"index":0,"delta":{"content":"半"},"finish_reason":null}]}\n'
+            "\n"
+        )
+        respx.post(f"{BASE_URL}/chat/completions").mock(
+            return_value=_sse_response(body)
+        )
+        stream = chat_stream("嗨", base_url=BASE_URL, api_key="k", model="m")
+        assert list(stream) == ["半"]
+        assert stream.result.content == "半"
+        assert stream.result.finish_reason == ""
+
+
+class TestChatStreamErrors:
+    @respx.mock
+    def test_error_status_raises_runtime_error_at_call_time(self):
+        respx.post(f"{BASE_URL}/chat/completions").mock(
+            return_value=httpx.Response(401, json={"error": {"message": "invalid api key"}})
+        )
+        with pytest.raises(RuntimeError) as exc:
+            chat_stream("嗨", base_url=BASE_URL, api_key="bad", model="m")
+        assert "API 401" in str(exc.value)
+        assert "invalid api key" in str(exc.value)
+
+    def test_error_body_is_read_from_an_unread_streaming_response(self, monkeypatch):
+        """真实网络响应下 body 没被预读，取错误信息必须先 read()。"""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                401, stream=_RawStream(b'{"error": "invalid api key"}')
+            )
+
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        monkeypatch.setattr(llm_client, "_get_client", lambda: client)
+
+        with pytest.raises(RuntimeError) as exc:
+            chat_stream("嗨", base_url=BASE_URL, api_key="bad", model="m")
+        assert "API 401" in str(exc.value)
+        assert "invalid api key" in str(exc.value)
+
+    @respx.mock
+    def test_truncated_stream_does_not_raise(self):
+        body = (
+            'data: {"choices":[{"index":0,"delta":{"content":"半截"},"finish_reason":"length"}]}\n'
+            "\n"
+            "data: [DONE]\n\n"
+        )
+        respx.post(f"{BASE_URL}/chat/completions").mock(
+            return_value=_sse_response(body)
+        )
+        stream = chat_stream("嗨", base_url=BASE_URL, api_key="k", model="m")
+        assert list(stream) == ["半截"]
+        assert stream.result.truncated is True
+        assert stream.result.finish_reason == "length"
+
+
+class TestChatStreamInterface:
+    @respx.mock
+    def test_iter_returns_self_so_a_second_loop_does_not_resend(self):
+        route = respx.post(f"{BASE_URL}/chat/completions").mock(
+            return_value=_sse_response()
+        )
+        stream = chat_stream("嗨", base_url=BASE_URL, api_key="k", model="m")
+        assert iter(stream) is stream
+        list(stream)
+        list(stream)
+        assert len(route.calls) == 1
+
+    @respx.mock
+    def test_close_releases_the_connection(self):
+        respx.post(f"{BASE_URL}/chat/completions").mock(
+            return_value=_sse_response()
+        )
+        stream = chat_stream("嗨", base_url=BASE_URL, api_key="k", model="m")
+        for _ in stream:
+            break
+        stream.close()
+        stream.close()
+
+    @respx.mock
+    def test_is_an_iterator_of_strings(self):
+        respx.post(f"{BASE_URL}/chat/completions").mock(
+            return_value=_sse_response()
+        )
+        stream = chat_stream("嗨", base_url=BASE_URL, api_key="k", model="m")
+        assert isinstance(stream, ChatStream)
+        assert next(iter(stream)) == "你"
 

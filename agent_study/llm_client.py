@@ -30,6 +30,16 @@
     task, response = chat_structured_response({"summary": "写周报"})
     print(task.title, response.finish_reason, response.usage)
 
+流式输出走 :func:`chat_stream`，返回的 :class:`ChatStream` 既是正文增量迭代器，
+又带着完整的 :class:`ChatResult`：
+
+    from agent_study.llm_client import chat_stream
+
+    stream = chat_stream("用一句话解释 Agent")
+    for delta in stream:
+        print(delta, end="", flush=True)
+    print(stream.result.content, stream.result.finish_reason, stream.result.usage)
+
 运行前在 ``.env.dev`` 里配置好 ``API_KEY``（MiniMax 订阅 Key）；
 ``API_BASE_URL`` 留空则使用官方地址。
 
@@ -38,9 +48,11 @@
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import re
-from dataclasses import dataclass
+from collections.abc import Iterator
+from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
 import httpx
@@ -69,22 +81,80 @@ class LLMStructuredOutputError(LLMResponseError):
     """模型输出不是合法 JSON，或不符合约定的 JSON Schema。"""
 
 
-@dataclass(frozen=True)
-class ChatResponse:
+@dataclass
+class ChatResult:
     """一次 chat completion 响应里值得拿走的字段。
 
     ``finish_reason`` 和 ``usage`` 是一等返回值：前者说明"为什么停下来"，
     后者是计费和成本估算的唯一权威来源。
+
+    同步调用一次性构造完整实例；流式调用则在收到 chunk 的过程中逐步填充
+    （所以这里不是 frozen dataclass）。流式的用法见 :class:`ChatStream`。
     """
 
-    content: str
-    finish_reason: str
-    usage: dict[str, Any]
+    content: str = ""
+    finish_reason: str = ""
+    usage: dict[str, Any] = field(default_factory=dict)
+    reasoning_content: str = ""
 
     @property
     def truncated(self) -> bool:
         """正文是否因为撞到输出上限而被截断。"""
         return self.finish_reason == "length"
+
+
+ChatResponse = ChatResult
+"""旧名字的别名，等价于 :class:`ChatResult`（同步与流式共用同一个类）。"""
+
+
+class ChatStream(Iterator[str]):
+    """一次流式 chat completion 的正文增量迭代器。
+
+    既是 ``Iterator[str]``（可以直接 ``for``），又通过 :attr:`result` 暴露
+    响应元信息::
+
+        stream = chat_stream("用一句话解释 Agent")
+        for delta in stream:
+            print(delta, end="", flush=True)
+        print(stream.result.content, stream.result.finish_reason)
+
+    :attr:`result` 是同一个对象，迭代过程中 ``content`` 就在实时累加，
+    ``finish_reason`` / ``usage`` 在对应 chunk 到达时落定 —— 迭代完成前
+    不要把它当最终结果用。
+
+    只能消费一次：迭代到底之后不会重新发请求。提前退出循环时调用
+    :meth:`close` 释放连接。
+    """
+
+    def __init__(
+        self,
+        result: ChatResult,
+        stack: contextlib.ExitStack,
+        response: httpx.Response,
+    ) -> None:
+        self.result = result
+        self._stack = stack
+        self._events = _iter_sse(response, result)
+
+    def __iter__(self) -> Iterator[str]:
+        return self
+
+    def __next__(self) -> str:
+        try:
+            return next(self._events)
+        except StopIteration:
+            self.close()
+            raise
+
+    def close(self) -> None:
+        """关闭底层连接。可重复调用。"""
+        self._stack.close()
+
+    def __enter__(self) -> "ChatStream":
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.close()
 
 
 _shared_client: httpx.Client | None = None
@@ -125,7 +195,7 @@ def chat_response(
     temperature: float | None = None,
     max_completion_tokens: int | None = None,
     timeout: float = 120.0,
-) -> ChatResponse:
+) -> ChatResult:
     """调用 OpenAI 兼容的 chat completions 接口，返回校验后的响应。
 
     响应结构不符合预期时抛 :class:`LLMResponseError`。
@@ -186,6 +256,75 @@ def chat(
     return response.content
 
 
+def chat_stream(
+    prompt: str,
+    *,
+    base_url: str = "",
+    api_key: str = "",
+    model: str = settings.MODEL_NAME,
+    reasoning_effort: str | None = None,
+    temperature: float | None = None,
+    max_completion_tokens: int | None = None,
+    include_usage: bool = False,
+    timeout: float = 120.0,
+) -> ChatStream:
+    """调用 OpenAI 兼容的 chat completions 接口，流式返回正文增量。
+
+    返回的 :class:`ChatStream` 可以直接 ``for`` 迭代，拿到的是正文增量；
+    完整的正文和响应元信息在 ``stream.result`` 上。
+
+        stream = chat_stream("用一句话解释 Agent")
+        for delta in stream:
+            print(delta, end="", flush=True)
+        print(stream.result.finish_reason, stream.result.usage)
+
+    与同步的 :func:`chat` 不同，流式不会因为 ``finish_reason`` 是
+    ``"length"`` 或 ``"content_filter"`` 就抛异常 —— 正文已经吐出去了，
+    抛异常会把已生成的内容一起丢掉。请自行检查
+    ``stream.result.truncated`` 和 ``stream.result.finish_reason``。
+
+    HTTP 状态码错误（>= 400）在返回之前就会抛 :class:`RuntimeError`。
+
+    ``include_usage=True`` 会额外发送 ``stream_options={"include_usage": True}``，
+    请求服务端在流末尾附带用量；不传该参数的兼容端可能直接报错，
+    所以默认关闭。
+    """
+    url = (
+        f"{(base_url or settings.API_BASE_URL).rstrip('/')}"
+        "/chat/completions"
+    )
+    payload = _build_payload(
+        prompt,
+        model=model,
+        reasoning_effort=reasoning_effort,
+        temperature=temperature,
+        max_completion_tokens=max_completion_tokens,
+    )
+    payload["stream"] = True
+    if include_usage:
+        payload["stream_options"] = {"include_usage": True}
+
+    headers = {
+        "Authorization": f"Bearer {api_key or settings.API_KEY}",
+        "Accept": "text/event-stream",
+    }
+
+    result = ChatResult()
+    stack = contextlib.ExitStack()
+    response = stack.enter_context(
+        _get_client().stream(
+            "POST", url, json=payload, headers=headers, timeout=timeout
+        )
+    )
+    if response.status_code >= 400:
+        # 流式响应下 body 还没读，直接取 response.text 会抛 ResponseNotRead
+        body = response.read().decode("utf-8", "replace")
+        stack.close()
+        raise RuntimeError(f"API {response.status_code}: {body[:300]}")
+
+    return ChatStream(result, stack, response)
+
+
 def chat_structured_response(
     prompt: str | dict[str, Any] | list[Any],
     *,
@@ -199,11 +338,11 @@ def chat_structured_response(
     max_completion_tokens: int | None = None,
     response_format: str | None = None,
     timeout: float = 120.0,
-) -> tuple[ModelT, ChatResponse]:
+) -> tuple[ModelT, ChatResult]:
     """让模型按 JSON Schema 输出，返回校验后的模型实例和原始响应元信息。
 
     返回 ``(instance, response)``：``instance`` 是按 ``schema`` 校验过的
-    Pydantic 对象，``response`` 是 :class:`ChatResponse`，带有
+    Pydantic 对象，``response`` 是 :class:`ChatResult`，带有
     ``finish_reason`` 和 ``usage``。
 
     ``prompt`` 既可以是字符串，也可以是 JSON 可序列化的 dict / list（任务数据），
@@ -341,6 +480,64 @@ def _post(
     return response.json()
 
 
+def _iter_sse(response: httpx.Response, result: ChatResult) -> Iterator[str]:
+    """解析 SSE 流，产出正文增量，同时把元信息填进 ``result``。
+
+    ``httpx`` 不做 SSE 解析，``iter_lines()`` 按行切开，行里带 ``data:`` 前缀。
+    解析顺序有讲究：先取 ``usage``，再看 ``choices`` —— 带 usage 的尾块常常
+    是 ``{"choices": [], "usage": {...}}``，先校验 choices 会把它整个吃掉。
+    """
+    for line in response.iter_lines():
+        if not line or not line.startswith("data:"):
+            continue
+
+        payload = line[len("data:"):].strip()
+        if not payload:
+            continue
+        if payload == "[DONE]":
+            break
+
+        try:
+            data = json.loads(payload)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(data, dict):
+            continue
+
+        error = data.get("error")
+        if error:
+            raise RuntimeError(f"流式响应返回错误：{error}")
+
+        usage = data.get("usage")
+        if isinstance(usage, dict) and usage:
+            result.usage = usage
+
+        choices = data.get("choices")
+        if not isinstance(choices, list) or not choices:
+            continue
+
+        choice = choices[0]
+        if not isinstance(choice, dict):
+            continue
+
+        finish_reason = choice.get("finish_reason")
+        if finish_reason:
+            result.finish_reason = str(finish_reason)
+
+        delta = choice.get("delta")
+        if not isinstance(delta, dict):
+            continue
+
+        reasoning = delta.get("reasoning_content")
+        if isinstance(reasoning, str) and reasoning:
+            result.reasoning_content += reasoning
+
+        content = delta.get("content")
+        if isinstance(content, str) and content:
+            result.content += content
+            yield content
+
+
 def _build_structured_content(
     prompt: str | dict[str, Any] | list[Any],
     schema: type[BaseModel],
@@ -410,7 +607,7 @@ def _extract_json_object(content: str) -> dict[str, Any]:
     return data
 
 
-def _parse_response(data: object) -> ChatResponse:
+def _parse_response(data: object) -> ChatResult:
     """校验响应结构，取出正文、结束原因和用量。
 
     这里不做业务判断（截断、内容过滤），只保证"拿到的就是想要的那几个字段"。
@@ -443,9 +640,11 @@ def _parse_response(data: object) -> ChatResponse:
         raise LLMResponseError("响应缺少 message.content")
 
     usage = data.get("usage")
+    reasoning = message.get("reasoning_content")
 
-    return ChatResponse(
+    return ChatResult(
         content=str(content),
         finish_reason=str(finish_reason) if finish_reason is not None else "",
         usage=usage if isinstance(usage, dict) else {},
+        reasoning_content=str(reasoning) if isinstance(reasoning, str) else "",
     )

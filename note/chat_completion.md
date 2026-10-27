@@ -297,12 +297,14 @@ Chat Completions 引入了 `messages`（带 role 的多轮对话）、`tools`（
 
 请求：`model`（必填）、`messages`（必填）、外加生成参数（`temperature`、`max_completion_tokens`、`n`、`stop`、`seed`、`response_format` 等）。
 响应最该看三处：`choices[0].message.content`（正文）、`choices[0].finish_reason`（为什么停）、`usage`（真实 token 用量，计费依据）。
-本项目 `agent_study/llm_client.py` 里：`chat_response()` 返回 `ChatResponse`
+本项目 `agent_study/llm_client.py` 里：`chat_response()` 返回 `ChatResult`
 （`content` + `finish_reason` + `usage` + `truncated`），`chat()` 只返回 `content` 文本，
 但会在响应被截断（`finish_reason == "length"`）时抛 `LLMResponseTruncatedError`——
 半截答案不该被当成完整答案往上层传。
 结构化输出同理：`chat_structured()` 只返回模型实例，
-`chat_structured_response()` 返回 `(模型实例, ChatResponse)`，两条路共用同一套校验。
+`chat_structured_response()` 返回 `(模型实例, ChatResult)`，两条路共用同一套校验。
+流式输出：`chat_stream()` 返回 `ChatStream`，它既是正文增量迭代器，
+又通过 `.result` 暴露同一个 `ChatResult`（同步与流式共用这一个类）。
 
 ### Q: temperature 到底做了什么？
 

@@ -102,7 +102,7 @@ def not_blank(cls, v: str) -> str:
 | 函数 | 返回 | 用在哪 |
 |---|---|---|
 | `chat_structured()` | 模型实例 | 只关心业务字段 |
-| `chat_structured_response()` | `(模型实例, ChatResponse)` | 还要记账、判断截断 |
+| `chat_structured_response()` | `(模型实例, ChatResult)` | 还要记账、判断截断 |
 
 `chat_structured()` 是 `chat_structured_response()` 的便捷包装，抛错行为完全一致：
 截断 → `LLMResponseTruncatedError`，内容过滤 → `LLMResponseError`，

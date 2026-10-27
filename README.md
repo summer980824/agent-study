@@ -63,6 +63,18 @@ task, response = chat_structured_response("把这段会议记录整理成一个�
 print(task.title, response.finish_reason, response.usage)   # 同时拿到响应元信息
 ```
 
+流式输出：
+
+```python
+from agent_study.llm_client import chat_stream
+
+stream = chat_stream("用一句话解释 Agent")   # ChatStream 既是迭代器，也带 .result
+for delta in stream:
+    print(delta, end="", flush=True)
+
+print(stream.result.content, stream.result.finish_reason, stream.result.usage)
+```
+
 ### 配置
 
 配置来自项目根目录的 `.env` 与 `.env.dev`（`APP_ENV` 环境变量可切换，默认 `dev`）：
