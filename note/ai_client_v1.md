@@ -45,7 +45,7 @@
    ▼
 ai() ──导入──▶ config.settings  (失败: ValidationError → stderr "配置加载失败" → exit 1)
    │
-   ├─ configure_logging()  （给 agent_study logger 装 JSON handler，只装一次）
+   ├─ configure_logging()  （给 agent_study logger 装 JSON handler，绑定当前 stderr）
    ├─ request_id = uuid.uuid4().hex[:12]
    │
    ├─ [request_context(request_id)]

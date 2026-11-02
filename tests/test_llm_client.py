@@ -223,6 +223,15 @@ class TestChatResponseValidation:
             chat("嗨", base_url=BASE_URL, api_key="k", model="m")
 
     @respx.mock
+    def test_non_json_body(self):
+        """200 但 body 不是 JSON（网关故障页）也是响应结构错误。"""
+        respx.post(f"{BASE_URL}/chat/completions").mock(
+            return_value=httpx.Response(200, text="<html>Bad Gateway</html>")
+        )
+        with pytest.raises(LLMResponseError, match="不是合法 JSON"):
+            chat("嗨", base_url=BASE_URL, api_key="k", model="m")
+
+    @respx.mock
     def test_choice_is_not_an_object(self):
         respx.post(f"{BASE_URL}/chat/completions").mock(
             return_value=httpx.Response(200, json={"choices": ["oops"]})

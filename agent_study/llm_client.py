@@ -510,7 +510,14 @@ def _post(
         raise RuntimeError(
             f"API {response.status_code}: {response.text[:300]}"
         )
-    return response.json()
+    try:
+        return response.json()
+    except json.JSONDecodeError as exc:
+        # 网关故障页 / 空 body 等"200 但不是 JSON"的响应，
+        # 和结构畸形一样算 LLMResponseError，调用方按内容层错误处理
+        raise LLMResponseError(
+            f"响应不是合法 JSON：{response.text[:200]!r}"
+        ) from exc
 
 
 def _iter_sse(response: httpx.Response, result: ChatResult) -> Iterator[str]:

@@ -161,6 +161,8 @@ def ai(
     try:
         from agent_study.config import settings
         from agent_study import llm_client
+
+        import httpx
     except ValidationError as exc:
         missing = sorted(
             ".".join(str(part) for part in err["loc"])
@@ -201,6 +203,19 @@ def ai(
             )
             typer.secho(f"LLM 响应错误：{exc}", fg=typer.colors.RED, err=True)
             raise typer.Exit(code=1) from exc
+        except httpx.HTTPError as exc:
+            # 超时（TimeoutException）和断连（ConnectError 等）都不是
+            # RuntimeError：漏掉它们会以 traceback 的形式漏到用户面前。
+            logger.error(
+                "ai request failed",
+                extra={"event": "ai_response", "error_type": type(exc).__name__},
+            )
+            typer.secho(
+                f"网络错误（{type(exc).__name__}）：{exc}",
+                fg=typer.colors.RED,
+                err=True,
+            )
+            raise typer.Exit(code=1) from exc
         except RuntimeError as exc:
             logger.error(
                 "ai request failed",
@@ -232,9 +247,13 @@ def ai(
             raise typer.Exit(code=1)
 
         logger.info(
-            f"ai request completed: finish_reason={response.finish_reason} "
-            f"usage={response.usage}",
-            extra={"event": "ai_response", "duration_ms": duration_ms},
+            "ai request completed",
+            extra={
+                "event": "ai_response",
+                "duration_ms": duration_ms,
+                "finish_reason": response.finish_reason,
+                "usage": response.usage,
+            },
         )
 
     typer.echo(response.content)

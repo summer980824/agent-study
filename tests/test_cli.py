@@ -404,6 +404,64 @@ class TestAi:
         assert "截断" in result.stderr
 
     @respx.mock
+    def test_ai_timeout_exits_non_zero_without_traceback(
+        self, runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+    ):
+        _fake_config_module(monkeypatch)
+        respx.post(LLM_API_URL).mock(
+            side_effect=httpx.TimeoutException("read timeout")
+        )
+        result = runner.invoke(cli.app, ["ai", "hi"])
+        assert result.exit_code == 1
+        assert "网络错误" in result.stderr
+        assert "TimeoutException" in result.stderr
+        assert "Traceback" not in result.output
+
+    @respx.mock
+    def test_ai_connection_error_exits_non_zero_without_traceback(
+        self, runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+    ):
+        _fake_config_module(monkeypatch)
+        respx.post(LLM_API_URL).mock(
+            side_effect=httpx.ConnectError("connection refused")
+        )
+        result = runner.invoke(cli.app, ["ai", "hi"])
+        assert result.exit_code == 1
+        assert "网络错误" in result.stderr
+        assert "ConnectError" in result.stderr
+        assert "Traceback" not in result.output
+
+    @respx.mock
+    def test_ai_malformed_response_structure_exits_non_zero(
+        self, runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+    ):
+        """200 但 choices 为空：属于响应结构错误，不能当成功，也不能 traceback。"""
+        _fake_config_module(monkeypatch)
+        respx.post(LLM_API_URL).mock(
+            return_value=httpx.Response(200, json={"choices": []})
+        )
+        result = runner.invoke(cli.app, ["ai", "hi"])
+        assert result.exit_code == 1
+        assert "LLM 响应错误" in result.stderr
+        assert "choices 为空" in result.stderr
+        assert "Traceback" not in result.output
+
+    @respx.mock
+    def test_ai_non_json_body_exits_non_zero(
+        self, runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+    ):
+        """网关故障页（200 + HTML）也算响应错误，而不是 json 解码 traceback。"""
+        _fake_config_module(monkeypatch)
+        respx.post(LLM_API_URL).mock(
+            return_value=httpx.Response(200, text="<html>Bad Gateway</html>")
+        )
+        result = runner.invoke(cli.app, ["ai", "hi"])
+        assert result.exit_code == 1
+        assert "LLM 响应错误" in result.stderr
+        assert "不是合法 JSON" in result.stderr
+        assert "Traceback" not in result.output
+
+    @respx.mock
     def test_ai_writes_structured_json_logs(
         self, runner: CliRunner, monkeypatch: pytest.MonkeyPatch
     ):
@@ -428,6 +486,15 @@ class TestAi:
         request_ids = {record["request_id"] for record in records}
         assert len(request_ids) == 1
         assert None not in request_ids
+        request_record = next(
+            record for record in records if record["event"] == "ai_request"
+        )
+        assert request_record["model"] == "gpt-4o-mini"
+        response_record = next(
+            record for record in records if record["event"] == "ai_response"
+        )
+        assert response_record["finish_reason"] == "stop"
+        assert response_record["usage"]["total_tokens"] == 20
 
 
 # ---------------------------------------------------------------------------
