@@ -15,6 +15,7 @@ never depends on the network being reachable.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import socket
 import subprocess
@@ -113,7 +114,7 @@ class TestHelp:
 
     def test_help_lists_every_command(self, runner: CliRunner):
         result = runner.invoke(cli.app, ["--help"])
-        for command in ("demo", "config", "github", "tasks"):
+        for command in ("demo", "config", "ai", "github", "tasks"):
             assert command in result.stdout
 
     def test_help_shows_usage_line(self, runner: CliRunner):
@@ -308,6 +309,125 @@ class TestConfig:
         _fake_config_module(monkeypatch, api_key="sk-topsecret-value")
         result = runner.invoke(cli.app, ["config"])
         assert "sk-topsecret-value" not in result.output
+
+
+# ---------------------------------------------------------------------------
+# ai（LLM 对话：config + llm_client + logging 串联）
+# ---------------------------------------------------------------------------
+
+LLM_API_URL = "https://api.example.com/chat/completions"
+
+
+def _llm_payload(content: str = "RAG 是检索增强生成。", finish_reason: str = "stop") -> dict:
+    return {
+        "choices": [
+            {
+                "message": {"role": "assistant", "content": content},
+                "finish_reason": finish_reason,
+            }
+        ],
+        "usage": {"prompt_tokens": 12, "completion_tokens": 8, "total_tokens": 20},
+    }
+
+
+class TestAi:
+    @respx.mock
+    def test_ai_prints_model_reply(
+        self, runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+    ):
+        _fake_config_module(monkeypatch)
+        route = respx.post(LLM_API_URL).mock(
+            return_value=httpx.Response(200, json=_llm_payload())
+        )
+        result = runner.invoke(cli.app, ["ai", "用三句话解释什么是 RAG"])
+        assert result.exit_code == 0
+        assert "RAG 是检索增强生成。" in result.stdout
+
+        request = route.calls[0].request
+        assert request.headers["Authorization"] == "Bearer sk-secret-abcdef1234"
+        body = json.loads(request.content)
+        assert body["model"] == "gpt-4o-mini"
+        assert body["messages"] == [
+            {"role": "user", "content": "用三句话解释什么是 RAG"}
+        ]
+
+    @respx.mock
+    def test_ai_model_option_overrides_config_default(
+        self, runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+    ):
+        _fake_config_module(monkeypatch)
+        route = respx.post(LLM_API_URL).mock(
+            return_value=httpx.Response(200, json=_llm_payload())
+        )
+        result = runner.invoke(cli.app, ["ai", "hi", "--model", "other-model"])
+        assert result.exit_code == 0
+        body = json.loads(route.calls[0].request.content)
+        assert body["model"] == "other-model"
+
+    def test_ai_without_prompt_is_a_usage_error(self, runner: CliRunner):
+        result = runner.invoke(cli.app, ["ai"])
+        assert result.exit_code != 0
+        assert "Usage" in result.output
+
+    def test_ai_missing_config_reports_missing_vars(
+        self, runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+    ):
+        _broken_config_module(monkeypatch)
+        result = runner.invoke(cli.app, ["ai", "hi"])
+        assert result.exit_code == 1
+        assert "配置加载失败" in result.stderr
+
+    @respx.mock
+    def test_ai_api_error_exits_non_zero(
+        self, runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+    ):
+        _fake_config_module(monkeypatch)
+        respx.post(LLM_API_URL).mock(
+            return_value=httpx.Response(401, json={"message": "unauthorized"})
+        )
+        result = runner.invoke(cli.app, ["ai", "hi"])
+        assert result.exit_code == 1
+        assert "401" in result.stderr
+
+    @respx.mock
+    def test_ai_truncated_response_exits_non_zero(
+        self, runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+    ):
+        _fake_config_module(monkeypatch)
+        respx.post(LLM_API_URL).mock(
+            return_value=httpx.Response(
+                200, json=_llm_payload("只有半截", finish_reason="length")
+            )
+        )
+        result = runner.invoke(cli.app, ["ai", "hi"])
+        assert result.exit_code == 1
+        assert "截断" in result.stderr
+
+    @respx.mock
+    def test_ai_writes_structured_json_logs(
+        self, runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+    ):
+        # 清掉其他用例留下的 handler，保证本用例的 handler
+        # 绑定到当前 CliRunner 替换掉的 stderr 上。
+        logging.getLogger("agent_study").handlers.clear()
+        _fake_config_module(monkeypatch)
+        respx.post(LLM_API_URL).mock(
+            return_value=httpx.Response(200, json=_llm_payload())
+        )
+        result = runner.invoke(cli.app, ["ai", "hi"])
+        assert result.exit_code == 0
+
+        records = [
+            json.loads(line)
+            for line in result.output.splitlines()
+            if line.startswith("{") and '"event"' in line
+        ]
+        events = [record["event"] for record in records]
+        assert "ai_request" in events
+        assert "ai_response" in events
+        request_ids = {record["request_id"] for record in records}
+        assert len(request_ids) == 1
+        assert None not in request_ids
 
 
 # ---------------------------------------------------------------------------

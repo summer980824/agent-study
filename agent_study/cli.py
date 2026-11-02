@@ -7,8 +7,13 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
+import logging
+import sys
 import tempfile
+import time
+import uuid
 from pathlib import Path
 from urllib.error import HTTPError
 
@@ -20,7 +25,7 @@ from agent_study.user import User
 
 app = typer.Typer(
     name="agent-study",
-    help="agent_study 工具集：本地演示、配置查看、任务文件与 GitHub 用户查询。",
+    help="agent_study 工具集：本地演示、配置查看、AI 对话、任务文件与 GitHub 用户查询。",
     no_args_is_help=True,
     add_completion=False,
 )
@@ -139,6 +144,102 @@ def config() -> None:
     )
 
 
+@app.command()
+def ai(
+    prompt: str = typer.Argument(..., help="发送给模型的提示词"),
+    model: str = typer.Option("", "--model", "-m", help="覆盖默认模型名"),
+    timeout: float = typer.Option(120.0, "--timeout", min=1.0, help="请求超时（秒）"),
+) -> None:
+    """调用配置的 LLM 回答一个提示词（会联网）。
+
+    配置来自 :mod:`agent_study.config`（模型 / 地址 / Key），请求走
+    :mod:`agent_study.llm_client`，整个过程按 JSON 格式记录日志
+    （见 :mod:`agent_study.logging_config`），每条日志都带同一个 request_id。
+    """
+    from agent_study.logging_config import configure_logging, request_context
+
+    try:
+        from agent_study.config import settings
+        from agent_study import llm_client
+    except ValidationError as exc:
+        missing = sorted(
+            ".".join(str(part) for part in err["loc"])
+            for err in exc.errors()
+        )
+        typer.secho(
+            "配置加载失败，缺少环境变量：" + ", ".join(missing),
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    configure_logging()
+    logger = logging.getLogger("agent_study.cli")
+    request_id = uuid.uuid4().hex[:12]
+    effective_model = model or settings.MODEL_NAME
+
+    with request_context(request_id):
+        logger.info(
+            "ai request started",
+            extra={"event": "ai_request", "model": effective_model},
+        )
+        started = time.monotonic()
+        try:
+            # base_url / api_key / model 显式传递：CLI 负责读配置，
+            # client 不自己猜配置来源，测试里也好替换。
+            response = llm_client.chat_response(
+                prompt,
+                base_url=settings.API_BASE_URL,
+                api_key=settings.API_KEY,
+                model=effective_model,
+                timeout=timeout,
+            )
+        except llm_client.LLMResponseError as exc:
+            logger.error(
+                "ai request failed",
+                extra={"event": "ai_response", "error_type": type(exc).__name__},
+            )
+            typer.secho(f"LLM 响应错误：{exc}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=1) from exc
+        except RuntimeError as exc:
+            logger.error(
+                "ai request failed",
+                extra={"event": "ai_response", "error_type": "HTTPError"},
+            )
+            typer.secho(f"请求失败：{exc}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=1) from exc
+
+        duration_ms = round((time.monotonic() - started) * 1000)
+        if response.truncated:
+            logger.error(
+                "ai response truncated",
+                extra={"event": "ai_response", "error_type": "truncated"},
+            )
+            typer.secho(
+                "输出被 max_completion_tokens 截断，只有半截正文",
+                fg=typer.colors.RED,
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        if response.finish_reason == "content_filter":
+            logger.error(
+                "ai response blocked",
+                extra={"event": "ai_response", "error_type": "content_filter"},
+            )
+            typer.secho(
+                "内容被内容过滤器拦截", fg=typer.colors.RED, err=True
+            )
+            raise typer.Exit(code=1)
+
+        logger.info(
+            f"ai request completed: finish_reason={response.finish_reason} "
+            f"usage={response.usage}",
+            extra={"event": "ai_response", "duration_ms": duration_ms},
+        )
+
+    typer.echo(response.content)
+
+
 @github_app.command("user")
 def github_user(
     name: str = typer.Argument(..., help="GitHub 用户名"),
@@ -229,6 +330,13 @@ def tasks_add(
 
 def main() -> None:
     """CLI 入口。"""
+    # Windows 控制台默认 GBK，模型返回的多语言正文按 GBK 编码容易乱码；
+    # 统一改成 UTF-8 输出。测试里的 CliRunner 会把 stdout 换成自己的包装
+    # 对象，没有 reconfigure，这里静默跳过。
+    for stream in (sys.stdout, sys.stderr):
+        if getattr(stream, "encoding", None) and stream.encoding.lower() != "utf-8":
+            with contextlib.suppress(AttributeError, OSError):
+                stream.reconfigure(encoding="utf-8", errors="replace")
     app()
 
 
