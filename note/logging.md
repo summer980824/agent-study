@@ -1,16 +1,22 @@
-## Levels
-| Level | When it’s used |
+# Python logging 学习笔记
+
+## 日志级别（Levels）
+
+| Level | When it's used |
 | --- | --- |
 | DEBUG | Detailed information, typically of interest only when diagnosing problems. |
 | INFO | Confirmation that things are working as expected. |
-| WARNING | An indication that something unexpected happened, or indicative of some problem in the near future (e.g. ‘disk space low’). The software is still working as expected. |
+| WARNING | An indication that something unexpected happened, or indicative of some problem in the near future (e.g. 'disk space low'). The software is still working as expected. |
 | ERROR | Due to a more serious problem, the software has not been able to perform some function. |
 | CRITICAL | A serious error, indicating that the program itself may be unable to continue running. |
 
-## Handlers
-StreamHandler instances send messages to streams (file-like objects).
-FileHandler instances send messages to disk files.
+## 处理器（Handlers）
 
+- `StreamHandler` instances send messages to streams (file-like objects).
+- `FileHandler` instances send messages to disk files.
 
-## Formatters
+## 格式化器（Formatters）
+
+```python
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+```

@@ -6,7 +6,7 @@
 
 ### 1.1 静态结构
 
-```
+```text
 用户
   │  uv run agent-study ai "用三句话解释什么是 RAG" [--model ...] [--timeout ...]
   ▼
@@ -39,7 +39,7 @@
 
 ### 1.2 一次调用的运行时数据流（含测试替身）
 
-```
+```text
 用户输入 prompt
    │
    ▼
@@ -71,7 +71,7 @@ ai() ──导入──▶ config.settings  (失败: ValidationError → stderr 
 
 ### 1.3 测试侧的镜像结构
 
-```
+```text
 tests/test_cli.py · TestAi
    │
    ├─ _fake_config_module()   sys.modules["agent_study.config"] 换成 SimpleNamespace

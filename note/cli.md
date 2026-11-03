@@ -1,11 +1,15 @@
-## typer 
-你用类型标注声明函数，它把函数自动"翻译"成一个完整的命令行程序。除了生成 --help 和校验，它还会做：
-1. 类型解析与强制转换：priority: int 会帮你把字符串参数转成 int，转不了就给出规范的错误和退出码，而不是抛出一堆 traceback。
-2. 必填/可选声明：title: str（无默认值 = 必填参数）、priority: int = 1（有默认值 = --option），一套规则全覆盖。
-3. 子命令组织：Typer() + @app.command() 天然对应"程序 → 子命令"的层级（agent-study tasks add），不用自己搭解析树。
-4. shell 自动补全：一条命令就能生成 Bash/Zsh/Fish 补全脚本，命令多了很有价值。
-5. 输出/交互增强：彩色输出、进度条、确认提示（typer.confirm）等开箱即用。
-6. 可测试性：CliRunner 配合 pytest。
+# CLI 命令行学习笔记
+
+## typer
+
+你用类型标注声明函数，它把函数自动"翻译"成一个完整的命令行程序。除了生成 `--help` 和校验，它还会做：
+
+1. **类型解析与强制转换**：`priority: int` 会帮你把字符串参数转成 int，转不了就给出规范的错误和退出码，而不是抛出一堆 traceback。
+2. **必填/可选声明**：`title: str`（无默认值 = 必填参数）、`priority: int = 1`（有默认值 = `--option`），一套规则全覆盖。
+3. **子命令组织**：`Typer()` + `@app.command()` 天然对应"程序 → 子命令"的层级（`agent-study tasks add`），不用自己搭解析树。
+4. **shell 自动补全**：一条命令就能生成 Bash/Zsh/Fish 补全脚本，命令多了很有价值。
+5. **输出/交互增强**：彩色输出、进度条、确认提示（`typer.confirm`）等开箱即用。
+6. **可测试性**：`CliRunner` 配合 pytest。
 7. 它底层基于 Click，只是把 Click 的"装饰器 + 手写类型"换成了"读 Python 类型标注"。
 
 ## CLI 对 AI 工程项目有什么价值

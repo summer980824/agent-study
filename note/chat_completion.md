@@ -4,6 +4,8 @@
 > 相关笔记：`note/token_basic.md`（token 怎么算）、`note/prompt_basic.md`（prompt 怎么写）
 > 复跑方式：`uv run pytest -q`；实验数据的采集方式见下文标注
 
+## 引言
+
 Chat Completion 是调用 LLM 最经典的接口：把一段对话（messages）发过去，模型回一段文本。
 今天要吃透三件事：**这个接口长什么样**、**temperature 到底改了什么**、**max tokens 到底限的是什么**。
 
@@ -109,7 +111,7 @@ Chat Completions 仍然支持但属于兼容路径。两者参数名对不上：
 模型每生成一个 token，先算出每个候选 token 的分数（logit），再按概率分布采样。
 **temperature 就是在 softmax 之前，把所有 logit 同除以 T**：
 
-```
+```text
 p_i = exp(z_i / T) / Σ_j exp(z_j / T)
 ```
 
@@ -184,7 +186,7 @@ p_i = exp(z_i / T) / Σ_j exp(z_j / T)
 上下文窗口是"输入 + 输出共享"的总额度（见 `note/token_basic.md`）。
 所以给输出留预算时，必须先减掉输入：
 
-```
+```text
 可用输出预算 ≤ 上下文窗口 − 输入 token − 安全余量
 ```
 

@@ -1,3 +1,5 @@
+# Token 基础：编码实测、上下文窗口与 tiktoken 用法
+
 ## 实验结果
 
 四段样本文本，分别用两种编码器实测（`agent_study/token_count_demo.py` 可复跑）。**不同编码器的数字不能直接对比，引用时必须注明用的是哪个。**
@@ -55,9 +57,9 @@ Token 是模型处理文本的计算单位：分词器（tokenizer）把字符�
 
 分三步：
 
-1. **确定容量**:128K = 131,072 token。
-2. **用对编码**:GPT-4o 用的是 `o200k_base`，不是 `cl100k_base`。本项目 `count_tokens(text, "o200k_base")` 即可。
-3. **算出占比**:`占比 = count_tokens(text, "o200k_base") / 131072 × 100%`。
+1. **确定容量**：128K = 131,072 token。
+2. **用对编码**：GPT-4o 用的是 `o200k_base`，不是 `cl100k_base`。本项目 `count_tokens(text, "o200k_base")` 即可。
+3. **算出占比**：`占比 = count_tokens(text, "o200k_base") / 131072 × 100%`。
 
 没有现成分词器时的速算（o200k 实测）：英文约 0.18 token/字符，中文约 0.50，代码/JSON 约 0.38。换算成容量直觉：
 
@@ -83,6 +85,6 @@ tiktoken 是 OpenAI 的开源分词器库（BPE 算法），本地运行、无�
 
 **注意事项**：
 
-- 编码必须和模型匹配：GPT-4o / o1 用 `o200k_base`,GPT-4 / GPT-3.5 用 `cl100k_base`，选错结果差很多（中文可差一倍）。
+- 编码必须和模型匹配：GPT-4o / o1 用 `o200k_base`，GPT-4 / GPT-3.5 用 `cl100k_base`，选错结果差很多（中文可差一倍）。
 - tiktoken 统计的是**裸文本**。完整聊天请求的实际 token 用量还包括消息角色/格式包装、工具定义（function calling 的 schema）、以及模型端自己的特殊 token 和处理规则，真实数字以 API 响应中的 usage 为准。
 - 本项目 `agent_study/token_count.py` 是对 tiktoken 的薄封装：`None` 返回 0；空字符串走 tiktoken 实测（结果为 0）。

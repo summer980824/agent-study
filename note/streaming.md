@@ -1,27 +1,32 @@
+# SSE 流式 Chat 实现与面试笔记
+
 ## SSE 客户端
+
 SSE 客户端就是按照 SSE（Server-Sent Events）协议规范，从 HTTP 响应流里持续读取并解析事件的服务端/前端代码。服务端把响应头设为 Content-Type: text/event-stream，然后不断往连接里写事件；客户端则保持这个连接，逐条取出事件交给业务逻辑。
 规范要点：
+
 - 事件与事件之间用空行分隔
 - 每个事件由若干字段行组成，最常用的是 data:，还有 event:（自定义事件名）、id:、retry:（重连间隔）
 - 以冒号 : 开头的行是注释/心跳，客户端必须忽略（这就是 OpenAI 流里 reasoning 期间那些 keep-alive 行）
 - 一个事件的多个 data: 行按换行拼接成完整 payload
+
 一句话总结：一个「读 HTTP 流并按 data:/:/空行 规则切分事件」的解析器，浏览器可以用 EventSource 白嫖，但调 LLM 时通常要自己用 fetch/httpx 手搓一个。
 
-# 流式 chat 接口设计
+## 流式 chat 接口设计
 
-## 目标
+### 目标
 
 给 `agent_study/llm_client.py` 加 `chat_stream()`，走 OpenAI 兼容的 SSE 流式接口，
 边收边吐正文增量，同时把 `finish_reason` / `usage` 拿回来。
 
-## 背景
+### 背景
 
 当前 `llm_client.py` 只有同步非流式调用（`chat` / `chat_response` /
 `chat_structured` / `chat_structured_response`），返回结构是 `ChatResponse`
 （`content` / `finish_reason` / `usage`）。流式需要一个既能吐增量、又能带元信息的
 返回结构，于是顺手把 `ChatResponse` 统一成 `ChatResult`，同步和流式共用同一个类。
 
-## 决策
+### 决策
 
 | 决策点 | 结论 | 理由 |
 | --- | --- | --- |
@@ -32,7 +37,7 @@ SSE 客户端就是按照 SSE（Server-Sent Events）协议规范，从 HTTP 响
 | `chat_stream()` 的时机 | **急切**（eager）：调用即建连、查状态码 | 与 `chat()` / `chat_response()` "调用即报错"的约定一致；HTTP 错误在返回 `ChatStream` 之前抛出 |
 | `stream_options` | 可选 kwarg `include_usage`，默认 `False` | 默认不发的兼容端可能直接 400；开了才向服务端要 usage |
 
-## 数据结构
+### 数据结构
 
 ```python
 @dataclass
@@ -61,7 +66,7 @@ class ChatResult:
 
 `ChatResponse = ChatResult` 作为兼容别名。
 
-## API
+### API
 
 ```python
 def chat_stream(
@@ -101,7 +106,7 @@ if not stream.done_received:
   提前 `break`、流内报错、连接中途断开时都为 False —— 这时 `finish_reason`
   可能是 `"stop"`，但正文并不完整
 
-## 请求
+### 请求
 
 - 请求体：`payload = _build_payload(...)` 之后加 `payload["stream"] = True`；
   `include_usage=True` 时再加 `payload["stream_options"] = {"include_usage": True}`。
@@ -110,7 +115,7 @@ if not stream.done_received:
   加 `Accept: text/event-stream`
 - `timeout` 是**每次读取**的超时，不是总时长
 
-## SSE 解析
+### SSE 解析
 
 ```python
 with _get_client().stream("POST", url, json=payload, headers=headers, timeout=timeout) as response:
@@ -140,7 +145,7 @@ with _get_client().stream("POST", url, json=payload, headers=headers, timeout=ti
 13. `delta.reasoning_content` 非空 → 累加到 `result.reasoning_content`
 14. `delta.content` 非空 → 累加到 `result.content` 并 yield（空串不 yield）
 
-## 错误处理
+### 错误处理
 
 - HTTP >= 400：**在建连后、迭代前**抛 `RuntimeError(f"API {status}: {body[:300]}")`。
   取 body 必须先 `response.read()`：流式响应下 `response.text` / `response.content`
@@ -155,7 +160,7 @@ with _get_client().stream("POST", url, json=payload, headers=headers, timeout=ti
   只把 `result.done_received` 留在 False。`result.finish_reason` 保持最后一次拿到的值，
   **可能是 `"stop"`** —— 所以判断正文是否完整要看 `done_received`，不能只看 `finish_reason`
 
-## 测试
+### 测试
 
 `tests/test_llm_client.py` 新增 `TestChatStream`，用 respx 打桩 SSE 文本流。
 SSE body 必须自带 `\n\n` 分隔符和结尾换行（`httpx.Response(text=...)` 不会自动补）。
@@ -197,7 +202,7 @@ SSE body 必须自带 `\n\n` 分隔符和结尾换行（`httpx.Response(text=...
 
 ---
 
-#### 一、对用户体验的影响
+### 一、对用户体验的影响
 
 **1. 感知延迟（perceived latency）比真实延迟更重要**
 
@@ -270,7 +275,7 @@ UI 上要显示"生成中断，已生成的部分如下"，而不是让用户对
 
 ---
 
-#### 二、对系统架构的影响
+### 二、对系统架构的影响
 
 **1. 连接生命周期：从短连接变成长连接**
 
@@ -370,7 +375,7 @@ response = stack.enter_context(
 
 ---
 
-#### 三、面试怎么答（结构建议）
+### 三、面试怎么答（结构建议）
 
 按这个顺序讲，30 秒到 3 分钟都能收住：
 
@@ -400,7 +405,7 @@ response = stack.enter_context(
 
 ---
 
-#### 四、和本仓库实现的对应关系
+### 四、和本仓库实现的对应关系
 
 | 架构关注点 | 本仓库的做法 |
 |---|---|
