@@ -1,14 +1,41 @@
+# agent-study
+
 An agent study project
 
 Senior Java Developer → AI Agent Engineer
+
+## AI Client
+
+本项目是一个最小但完整的 AI Agent 学习工程，核心是一条 LLM 调用链路：
+**CLI → Config → LLM Client → API**——`agent-study ai` 命令负责读配置、调度、
+错误翻译，配置由 `.env` 管理，请求经共享 `httpx.Client` 发给 OpenAI 兼容接口，
+全过程记录带 `request_id` 的结构化日志，并可被 mock 做离线测试。
+
+```
+用户
+  │  uv run agent-study ai "用三句话解释什么是 RAG" [--model ...] [--timeout ...]
+  ▼
+agent_study.cli · ai()          # 参数解析、调度、错误 → 退出码翻译
+  ├─▶ config.py · Settings      # .env / .env.dev 加载模型/地址/Key（pydantic-settings）
+  ├─▶ logging_config            # JSON 日志 + request_context 注入 request_id
+  └─▶ llm_client.py             # chat_response()：构建请求 → 共享 httpx.Client → 校验响应
+                            │  POST {API_BASE_URL}/chat/completions
+                            ▼
+                  OpenAI 兼容 API（默认 MiniMax）
+```
+
+详细文档见 [docs/ai-client.md](docs/ai-client.md)（面向新人的完整介绍）。
 
 ## Quick Start
 
 Requires [uv](https://docs.astral.sh/uv/).
 
 ```bash
-uv sync              # create .venv and install deps
-uv run agent-study --help  # show available commands
+git clone <repo-url> && cd agent-study
+uv sync                    # create .venv and install deps
+cp .env.example .env       # 填入 API_KEY
+uv run agent-study config  # 验证配置（Key 脱敏）
+uv run agent-study ai "用一句话解释 Agent"   # 发起第一次对话
 ```
 
 无需手动激活虚拟环境——`uv run` 会自动使用项目自带的 `.venv`。
@@ -30,6 +57,32 @@ uv run agent-study tasks add "标题"  # 追加一条任务
 uv run agent-study github user octocat          # 联网：单个用户
 uv run agent-study github async octocat torvalds # 联网：并发多个用户
 ```
+
+### agent-study ai：发起一次 LLM 对话
+
+```bash
+uv run agent-study ai "用三句话解释什么是 RAG"                 # 用默认模型
+uv run agent-study ai "用三句话解释什么是 RAG" -m MiniMax-M3.1   # 覆盖模型
+uv run agent-study ai "用三句话解释什么是 RAG" --timeout 60     # 覆盖超时（秒，默认 120）
+```
+
+正常调用直接打印模型回答；出错时提示走 stderr、退出码为 1：
+
+```bash
+$ uv run agent-study ai "hello"          # API Key 缺失或无效
+配置加载失败，缺少环境变量：API_KEY
+
+$ uv run agent-study ai "hello"          # 网络层错误（超时/断连）
+网络错误（ConnectError）：...
+
+$ uv run agent-study ai "hello"          # HTTP 200 但没拿到完整答案
+输出被 max_completion_tokens 截断，只有半截正文
+内容被内容过滤器拦截
+```
+
+- 配置来自 `.env` / `.env.dev`（`config` 命令可查看，Key 脱敏），请求走 `llm_client`，
+  整个过程按 JSON 格式记日志，每条日志带同一个 `request_id`。
+- 不会把半截答案当成完整答案返回；详细介绍见 [docs/ai-client.md](docs/ai-client.md)。
 
 ## 运行 LLM 客户端示例
 

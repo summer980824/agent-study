@@ -8,14 +8,14 @@
 
 - Python 的 `dict` / `list` 原生对应 JSON 的 object / array，配合 `json` 模块（`json.dumps` / `json.loads`）即可双向转换；Java 需要 Jackson / Gson 这类库。
 - Python 函数参数不需要声明类型也能跑；类型提示（`def f(x: int) -> str`）是给编辑器和 `mypy` 用的，运行时不强制。
-- `None` 对应 Java 的 `null`，但 Python 没有 `Optional` 编译期检查，忘记判空要到运行时才炸（`AttributeError` / `TypeError`）。
+- `None` 对应 Java 的 `null`。Python 有 `Optional[X]` / `X | None` 类型提示，`mypy` 等静态检查工具**能**检查它，但运行时不会强制执行——忘记判空要靠类型检查或测试提前发现，否则到运行时才炸（`AttributeError` / `TypeError`）。
 - 开发体验上：Python 写脚本快、REPL/notebook 迭代快；代价是重构依赖测试和类型检查兜底，而不是编译器。
 
 ## Maven/Gradle 与 uv 的依赖管理差异。
 
 结论："解析更快、默认锁文件"，语义上更像 Cargo。
 
-- uv 与 Maven 一样会解析**兼容的版本区间**，但它把解析结果写进 `uv.lock` 锁文件，`uv sync` 严格按锁文件安装——可复现性反而比 Maven 强（Maven 默认不会锁 transitive 依赖版本，需要 `dependencyManagement` 手工钉）。
+- uv 与 Maven 一样会解析**兼容的版本区间**，但它把解析结果写进 `uv.lock` 锁文件，`uv sync` 严格按锁文件安装——差异在**默认机制**：uv 锁文件是一等公民、开箱即用；Maven 也支持锁定（`dependencyManagement` 钉版本、`flatten-maven-plugin`、Enforcer 规则约束版本区间），只是要手工搭建，默认的 `mvn install` 按解析结果直接装。可复现性不是能力差距，是约定和成本的差距。
 - 速度差距来自实现：uv 用 Rust 写的、全局缓存，解析和安装比 Maven/Gradle 快一两个数量级。
 - 对应关系：`pom.xml` ≈ `pyproject.toml`，`mvn install` ≈ `uv sync`，本地仓库 `~/.m2` ≈ uv 的全局缓存。
 - "旧版本兼容、build 或 runtime 报错"不是 Maven 的特性，是**语义化版本 + 依赖传递**带来的普遍问题，Python 生态同样有（所以才需要 lock 文件）。
@@ -65,7 +65,7 @@ Python 侧的对应物要拼装：
 - 数据形态匹配：AI 工作流本质是"张量 + JSON 消息 + notebook 迭代"，Python 的 dict/notebook 天然贴合，Java 的类型 ceremony 在这里是纯负担。
 - 胶水能力：Python 是"第二好的语言"——数值计算底层是 C/C++/CUDA（numpy、torch），Python 只负责编排，所以慢的不是热点路径。
 - 调试方式：AI 开发大量依赖"改提示词 → 跑一次看输出"，脚本化 + notebook 的反馈速度远超编译部署周期。
-- 反过来 Python 的短板（并发弱、GIL、运行时才发现类型错误）在"脚本化调 API、做编排"的场景里都不致命。
+- 反过来看 Python 的短板，也要看场景：GIL 主要限制传统 CPython 里 **CPU 密集型的多线程**（这时要 multiprocessing 或把热点下沉到 C/CUDA）；而**异步 I/O 并发**（asyncio + httpx）不受 GIL 影响，几千个并发网络请求没有问题——调 API、做编排正好是 I/O 密集型场景。运行时才发现类型错误则靠类型检查工具和测试兜底。
 
 ## 哪些企业级能力仍然值得复用 Java 的工程经验。
 
