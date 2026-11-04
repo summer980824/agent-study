@@ -65,7 +65,7 @@ Python 侧的对应物要拼装：
 - 数据形态匹配：AI 工作流本质是"张量 + JSON 消息 + notebook 迭代"，Python 的 dict/notebook 天然贴合，Java 的类型 ceremony 在这里是纯负担。
 - 胶水能力：Python 是"第二好的语言"——数值计算底层是 C/C++/CUDA（numpy、torch），Python 只负责编排，所以慢的不是热点路径。
 - 调试方式：AI 开发大量依赖"改提示词 → 跑一次看输出"，脚本化 + notebook 的反馈速度远超编译部署周期。
-- 反过来看 Python 的短板，也要看场景：GIL 主要限制传统 CPython 里 **CPU 密集型的多线程**（这时要 multiprocessing 或把热点下沉到 C/CUDA）；而**异步 I/O 并发**（asyncio + httpx）不受 GIL 影响，几千个并发网络请求没有问题——调 API、做编排正好是 I/O 密集型场景。运行时才发现类型错误则靠类型检查工具和测试兜底。
+- 反过来看 Python 的短板，也要看场景：GIL 主要限制传统 CPython 里 **CPU 密集型的多线程**（这时要 multiprocessing 或把热点下沉到 C/CUDA）；而**异步 I/O 并发**（asyncio + httpx）不受 GIL 影响，可以支持大量并发 I/O 请求，实际并发量受连接池、文件描述符、服务端限流等因素约束——调 API、做编排正好是 I/O 密集型场景。运行时才发现类型错误则靠类型检查工具和测试兜底。
 
 ## 哪些企业级能力仍然值得复用 Java 的工程经验。
 
