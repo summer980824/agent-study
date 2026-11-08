@@ -56,6 +56,7 @@ for epoch in range(100):
 
     # 2. 清零梯度（否则会累加）
     w.grad = None   # 等价于 w.grad.zero_()
+    b.grad = None
 
     # 3. 反向：算出 ∂loss/∂w 和 ∂loss/∂b
     loss.backward()
