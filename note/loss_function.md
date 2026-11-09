@@ -2,7 +2,7 @@
 nn.MSELoss() —— 均方误差损失
 预测值与真实值之差的平方，取平均。常用于回归任务（预测连续值，如房价、评分）。
 关键特性：
-- 对大误差惩罚重（平方放大差异），对小误差"不敏感"（梯度随误差线性减小）
+- 对大误差惩罚重（平方放大差异），MSE 的梯度与预测误差成正比，误差越小，梯度绝对值越小；误差越大，惩罚通常越大。
 - 输出和 target 维度必须一致，无需额外处理
 - 适合做回归，做分类时它不是最优
 
@@ -10,7 +10,7 @@ nn.MSELoss() —— 均方误差损失
 nn.CrossEntropyLoss() —— 交叉熵损失
 用于分类任务（预测类别标签，如"猫/狗/鸟"）。
 关键特性：
-- target 是类别索引（Long 类型），不是 one-hot 向量
+- target 是类别索引（Long 类型），不是 one-hot 向量。这是最常用的输入形式。PyTorch 也支持与 logits 同形状的概率分布形式 target。
 - 即使预测正确但置信度低，loss 仍然大（鼓励模型更"自信"）——这正是它做分类优于 MSE 的核心原因
 - 输出和 target 维度不同：logits 是 [batch, num_classes]，labels 是 [batch]
 
@@ -46,7 +46,7 @@ loss = loss_fn(torch.softmax(logits, dim=1), targets)  # ❌ 不要再手动 Sof
 | | Loss | Metric |
 |---|---|---|
 | 作用 | 反向传播、参数更新 | 评估、对比、调参 |
-| 要求 | 可导、光滑、对误差敏感 | 直观、符合业务语义 |
+| 要求 | 可导、可微、对误差敏感 | 直观、符合业务语义 |
 | 例子 | MSE、Cross Entropy、MAE | Accuracy、F1、AUC、Precision/Recall |
 
 以分类任务为例：
