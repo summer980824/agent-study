@@ -21,17 +21,20 @@
 ## 3. Knowledge Gaps
 
 - Topic 1:	为什么 logits (1, 3) 不能与 targets (2,) 直接用于普通 CrossEntropy？
-CrossEntropy需要相同数量的样本数
+CrossEntropy需要两个 Tensor 的样本数量必须一致。
 - Topic 2:  Accuracy = 0.5 代表什么？
-代表样本预测一半正确
+模型在参与评估的样本中，预测正确的比例为 50%。
 - Topic 3:  为什么只计算 y_pred 不会自动改变模型参数？
 计算预测值只需要参数的当前值，是纯粹的函数求值
 
 ## 4. Important Lessons
 
 - Why backward() is necessary:
+用来计算各个参数的梯度
 - Why optimizer.step() is necessary:
+根据梯度和优化算法更新模型参数。
 - Why Adam is not always better than SGD:
+在**简单、条件数好**的问题上，调好 lr 的 SGD（尤其带动量）往往收敛更彻底。
 
 ## 5. Next Week Focus
 
