@@ -71,7 +71,7 @@ train_loader = DataLoader(dataset, batch_size=16, shuffle=True, drop_last=False)
 | 16 | 7（最后一批只有 4 个样本） |
 | 1 | 100（随机梯度下降 SGD） |
 
-batch size 越小，一个 epoch 内参数更新越频繁（每次更新更接近真实梯度方向、噪声更小方向更随机）；batch size 越大，单次更新的梯度估计越准，但更新次数少、内存占用高。
+batch size 越小，一个 epoch 内参数更新越频繁, 梯度噪声通常越大；batch size 越大，单次更新的梯度估计越准，但更新次数少、内存占用高。
 
 ## 为什么训练中通常用 mini-batch，而不是一次性加载整个数据集
 
