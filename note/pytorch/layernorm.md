@@ -44,7 +44,19 @@ BatchNorm 的均值和方差是用当前 batch 的数据估计的。batch size �
 
 1. **统计量噪声大**：均值/方差估计不准（高方差），每次迭代的归一化结果波动剧烈，训练不稳定、 loss 抖动。
 2. **train/eval 不一致被放大**：训练用 batch 统计量（噪声大），测试用滑动平均（相对准确），两者的系统性偏差在小 batch 下更严重，导致 eval 性能明显掉。
-3. **极端情况 batch size = 1**：每个样本被归一化成全 0 向量，模型学不到任何东西。
+3. **极端情况 batch size = 1**：能否计算取决于每个通道有多少个统计元素。
+   - 输入 `[1, C]`（无空间维度）：每个通道只有 1 个元素，方差无定义，训练直接报错：
+
+     ```python
+     bn = nn.BatchNorm1d(4)
+     bn(torch.randn(1, 4))  # train 模式下
+     # ValueError: Expected more than 1 value per channel when training,
+     #             got input size torch.Size([1, 4])
+     ```
+
+   - 输入 `[1, C, L]`（有空间维度，`L > 1`，如 Conv 特征图）：统计量在 batch 和空间位置维度（N、L）上联合计算，通道内仍有 L 个元素，训练可以正常进行，只是统计量完全来自单条样本，质量受影响。
+
+   以上两种情况的实验见 `notebooks/day40_layernorm.ipynb` 倒数第二个 cell。
 4. **分布式训练更糟**：每个 GPU 算自己小 batch 的统计量（而不是全局统计量），进一步加剧噪声。
 
 实践结论：BatchNorm 在 batch size ≥ 32 左右才比较稳定，小 batch 场景（如检测、分割、大模型训练）通常改用 LayerNorm、GroupNorm 等不依赖 batch 的归一化。
@@ -79,6 +91,14 @@ with torch.no_grad():
 - 忘记调 `eval()` 是常见 bug：测试时仍在更新 running 统计量，且归一化结果随 batch 内容漂移，指标不可信。
 - `bn(x)` 在 eval 下的结果不等于用当前 x 重新算统计量的结果。
 - LayerNorm 没有 running 统计量，`train()` 和 `eval()` 下行为完全相同，这也是它省心的地方。
+
+### 实验
+
+见 `notebooks/day40_layernorm.ipynb` 最后两个 cell（`track_running_stats=True` 默认值），实验输出验证了三个要点：
+
+1. **train 的归一化和 running 更新是两件事**：前向输出始终用当前 batch 统计量；running 只是顺带用 `momentum`（默认 0.1）做滑动平均，为 eval 做准备。例如两个 batch 均值分别为 `[2, 3, 4]`、`[6, 7, 8]`，running_mean 依次更新为 `[0.2, 0.3, 0.4]` → `[0.78, 0.97, 1.16]`。
+2. **eval 用的是整个训练历史的加权平均**，不是任何单个 batch 的统计量——所以输入 `[10, 11, 12]` 这种远离训练分布的数据，输出是 `[8.45, 9.19, 9.94]` 而不是 0 附近；且 eval 输出与 `(x - running_mean) / sqrt(running_var + eps)` 手动计算完全一致。
+3. **eval 下重复调用结果完全一致**（确定性），不受输入内容影响。
 
 ## Q5: Transformer 为什么常用 LayerNorm
 
