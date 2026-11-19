@@ -39,3 +39,8 @@ build-backend = "hatchling.build"
 
 [tool.uv]
 package = true
+
+[tool.uv.sources]
+torch = [
+    { url = "https://mirror.sjtu.edu.cn/pytorch-wheels/cu132/torch-2.15.0%2Bcu132-cp312-cp312-win_amd64.whl", marker = "python_full_version == '3.12.*'" },
+]
