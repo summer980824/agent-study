@@ -92,7 +92,7 @@ $$\tilde{h} = \frac{m \odot h}{1-p}, \quad E[\tilde{h}] = h$$
 ### 实际怎么用
 
 - 传统 CNN、简单 MLP：ReLU（及其变体 LeakyReLU 等）够用且快
-- **Transformer（BERT、GPT 等）**：基本标配 GELU。原因之一是注意力分数有正有负且分布较平滑，硬截断会丢掉信息；实验上 GELU 在这些架构上效果 consistently 略好
+- **Transformer（BERT、GPT 等）**：基本标配 GELU。
 
 ### 一句话总结
 
