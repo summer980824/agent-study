@@ -61,7 +61,7 @@ def stable_softmax(x):
 
 $$\frac{e^{x_i - c}}{\sum_j e^{x_j - c}} = \frac{e^{x_i}}{\sum_j e^{x_j}}$$
 
-所以 `stable_softmax([1000, 1001, 1002])` ≡ `softmax([-2, -1, 0])` ≡ `softmax([1, 2, 3])`，输出完全相同。
+所以 `stable_softmax([1000, 1001, 1002])` ≡ `softmax([-2, -1, 0])` ≡ `softmax([1, 2, 3])`，数学上结果完全相等，实际浮点计算允许存在微小误差。
 
 **不减最大值会出什么事？**
 
