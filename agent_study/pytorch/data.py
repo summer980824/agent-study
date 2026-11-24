@@ -2,7 +2,6 @@ import torch
 from torch import nn
 
 def build_toy_dataset():
-    torch.manual_seed(42)
     vocab = {
         'good': 0,
         'bad': 1,
