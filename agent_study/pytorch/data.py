@@ -1,5 +1,4 @@
 import torch
-from torch import nn
 
 def build_toy_dataset():
     vocab = {
