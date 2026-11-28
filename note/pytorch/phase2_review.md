@@ -1,22 +1,35 @@
 # Phase2 总结
 ## 学习内容
-模块	自查内容   评价
-- Tensor	Shape、dtype、矩阵运算   A
-- Autograd	backward、梯度计算       B
-- nn.Module	参数注册、forward        A
-- Loss	MSE、CrossEntropy           B
-- Optimizer	SGD、Adam、参数更新      B 
-- Training Loop	forward → loss → backward → step   B
-- Dataset	Dataset、DataLoader、mini-batch        A
-- Embedding	Token ID 到向量                       B
-- 网络组件	Activation、Dropout、LayerNorm         B
-- 工程化	data.py、model.py、train.py            B
-- Attention	QKᵀ → Softmax → 权重加权 V             B
+模块	自查内容 
+- Tensor	Shape、dtype、矩阵运算 
+- Autograd	backward、梯度计算 
+- nn.Module	参数注册、forward 
+- Loss	MSE、CrossEntropy  
+- Optimizer	SGD、Adam、参数更新  
+- Training Loop	forward → loss → backward → step 
+- Dataset	Dataset、DataLoader、mini-batch 
+- Embedding	Token ID 到向量 
+- 网络组件	Activation、Dropout、LayerNorm
+- 工程化	data.py、model.py、train.py 
+- Attention	QKᵀ → Softmax → 权重加权 V 
 
-## 收获
-- 了解了Tensor的各个组件和训练中的用法
-- 区分训练集、验证集和测试集的职责。
-- 正确解释泛化、过拟合和数据泄漏。
+评价
+- A（掌握）：Tensor、Autograd、基本训练流程
+- B（基本掌握）：Dataset、DataLoader、模型训练与评估
+- C（需要继续练习）：Attention、LayerNorm、Activation
+
+## 本阶段最重要的三个收获
+
+1. 理解 PyTorch Tensor 和自动求导机制。
+2. 能够独立实现简单模型训练流程。
+3. 初步理解 Attention 的计算过程。
+
+## 代表性项目
+
+- PyTorch 基础训练实验
+- Simple Attention 实现
+- 对应 GitHub Commit
+
 
 ## 完整训练入口的实际运行结果
 (agent-study) PS D:\workspace\agent-study> uv run python -m agent_study.pytorch.train
@@ -28,7 +41,8 @@ Test accuracy: 100.00%
 layernorm和activation不熟悉的知识点已经添加到笔记。
 
 ## Phase 3 的学习重点
-Transformation架构
+进入 Transformer 架构，重点理解 Self-Attention、
+Multi-Head Attention、Positional Encoding 和 Transformer Block。
 
 ## 如何证明模型真正学到了规律，而不是记住了训练样本？
 
