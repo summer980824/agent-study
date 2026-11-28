@@ -14,7 +14,21 @@
 - Attention	QKᵀ → Softmax → 权重加权 V             B
 
 ## 收获
-了解了Tensor的各个组件和训练中的用法
+- 了解了Tensor的各个组件和训练中的用法
+- 区分训练集、验证集和测试集的职责。
+- 正确解释泛化、过拟合和数据泄漏。
+
+## 完整训练入口的实际运行结果
+(agent-study) PS D:\workspace\agent-study> uv run python -m agent_study.pytorch.train
+Initial loss: 0.668118
+Final loss: 0.000000
+Test accuracy: 100.00%
+
+## 尚未掌握的知识点
+layernorm和activation不熟悉的知识点已经添加到笔记。
+
+## Phase 3 的学习重点
+Transformation架构
 
 ## 如何证明模型真正学到了规律，而不是记住了训练样本？
 
@@ -29,7 +43,9 @@ train_loss = evaluate(model, train_loader)   # 见过
 test_loss  = evaluate(model, test_loader)    # 没见过
 ```
 
-- 如果 test_loss 和 train_loss 接近 → 学的是规律
+- Training loss 低：模型在训练样本上表现好。
+- Validation loss 低：模型在用于调参的验证集上表现好。
+- Test loss 低：模型在独立测试集上表现好，提供了泛化能力的证据。
 - 如果 train_loss 很低而 test_loss 很高 → 记住了训练样本（过拟合）
 
 关键坑：数据泄漏会让测试集失效——比如归一化统计量、tokenizer 词表、特征工程用了全量数据，或同一样本的近似重复同时出现在训练和测试里。
@@ -71,7 +87,7 @@ test_loss  = evaluate(model, test_loader)    # 没见过
 - **插值**（interpolation）：测试点在训练数据覆盖的范围内 → 过拟合的模型也能做对，证明力弱
 - **外推**（extrapolation）：测试点超出训练分布（更大的数、更长的序列）→ 只有真正学到规律才能做对，证明力强
 
-设计实验时优先测外推能力。
+设计实验时模型泛化通常首先关注独立同分布（IID）测试数据上的表现。外推（Extrapolation）是更严格的能力测试，但不是判断模型是否学到规律的必要条件。很多模型在训练分布之外本来就不擅长外推。
 
 ### 一句话总结
 
