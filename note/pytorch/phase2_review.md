@@ -1,17 +1,20 @@
 # Phase2 总结
 ## 学习内容
-模块	自查内容
-- Tensor	Shape、dtype、矩阵运算
-- Autograd	backward、梯度计算
-- nn.Module	参数注册、forward
-- Loss	MSE、CrossEntropy
-- Optimizer	SGD、Adam、参数更新
-- Training Loop	forward → loss → backward → step
-- Dataset	Dataset、DataLoader、mini-batch
-- Embedding	Token ID 到向量
-- 网络组件	Activation、Dropout、LayerNorm
-- 工程化	data.py、model.py、train.py
-- Attention	QKᵀ → Softmax → 权重加权 V
+模块	自查内容   评价
+- Tensor	Shape、dtype、矩阵运算   A
+- Autograd	backward、梯度计算       B
+- nn.Module	参数注册、forward        A
+- Loss	MSE、CrossEntropy           B
+- Optimizer	SGD、Adam、参数更新      B 
+- Training Loop	forward → loss → backward → step   B
+- Dataset	Dataset、DataLoader、mini-batch        A
+- Embedding	Token ID 到向量                       B
+- 网络组件	Activation、Dropout、LayerNorm         B
+- 工程化	data.py、model.py、train.py            B
+- Attention	QKᵀ → Softmax → 权重加权 V             B
+
+## 收获
+了解了Tensor的各个组件和训练中的用法
 
 ## 如何证明模型真正学到了规律，而不是记住了训练样本？
 
